@@ -144,6 +144,7 @@ type RunAuditParams = {
   filePath: string;
   userEmail: string;
   jobId?: string;
+  ownerKey: string;
 };
 
 type RunAuditResult = {
@@ -157,10 +158,12 @@ export async function runAuditPipeline({
   filePath,
   userEmail,
   jobId,
+  ownerKey,
 }: RunAuditParams): Promise<RunAuditResult> {
   const resolvedJobId = jobId ?? randomUUID();
   const baseStatus = {
     jobId: resolvedJobId,
+    ownerKey,
     filePath,
     email: userEmail,
   };
@@ -241,7 +244,7 @@ export async function runAuditPipeline({
     await updateStatus("upload", 88);
     const baseName = path.posix.parse(filePath).name || "report";
     const timestamp = Date.now();
-    const reportFilePath = `reports/${baseName}-${timestamp}.pdf`;
+    const reportFilePath = `reports/${ownerKey}/${baseName}-${timestamp}.pdf`;
 
     const { error: uploadError } = await supabase.storage
       .from(FINAL_BUCKET)

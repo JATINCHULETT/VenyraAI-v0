@@ -100,6 +100,7 @@ export function WorkspaceTab({
   pipelineStage,
   oauthProviders,
   awsAccountId,
+  isGuestSession = false,
 }: {
   email: string;
   setEmail: (v: string) => void;
@@ -113,6 +114,8 @@ export function WorkspaceTab({
   pipelineStage?: string;
   oauthProviders: OauthProviderFlags;
   awsAccountId?: string;
+  /** When true, outputs are scoped to this page load only (refresh clears the list). */
+  isGuestSession?: boolean;
 }) {
   const { status } = useSession();
   const [drag, setDrag] = useState(false);
@@ -306,6 +309,13 @@ export function WorkspaceTab({
             </button>
           )}
         </motion.div>
+      )}
+
+      {isGuestSession && (
+        <p className="rounded-xl border border-[color-mix(in_oklch,var(--border)_45%,transparent)] bg-[color-mix(in_oklch,var(--card)_88%,transparent)] px-4 py-3 text-xs leading-relaxed text-[var(--fg-muted)]">
+          You&apos;re browsing as a guest. Reports and pipeline status are tied to this page load only — a full refresh
+          starts a new temporary scope and won&apos;t show previous outputs. Sign in to keep a persistent workspace.
+        </p>
       )}
 
       {connectError && (

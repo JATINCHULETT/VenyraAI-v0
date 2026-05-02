@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { signOut as nextAuthSignOut, useSession } from "next-auth/react";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
@@ -16,6 +16,7 @@ type AppAuthContextValue = {
   user: AppAuthUser | null;
   loading: boolean;
   signOutAll: () => Promise<void>;
+  getSupabaseAccessToken: () => Promise<string | null>;
 };
 
 const AppAuthContext = createContext<AppAuthContextValue | null>(null);
@@ -34,6 +35,12 @@ export function AppAuthProvider({ children }: { children: React.ReactNode }) {
   const { data: session, status } = useSession();
   const [supabaseUser, setSupabaseUser] = useState<AppAuthUser | null>(null);
 
+  const getSupabaseAccessToken = useCallback(async () => {
+    const supabase = getSupabaseBrowserClient();
+    const { data } = await supabase.auth.getSession();
+    return data.session?.access_token ?? null;
+  }, []);
+
   useEffect(() => {
     const supabase = getSupabaseBrowserClient();
     void supabase.auth.getSession().then(({ data }) => {
@@ -49,6 +56,12 @@ export function AppAuthProvider({ children }: { children: React.ReactNode }) {
 
   const value = useMemo<AppAuthContextValue>(() => {
     const loading = status === "loading";
+    const signOutAll = async () => {
+      await nextAuthSignOut({ redirect: false });
+      const supabase = getSupabaseBrowserClient();
+      await supabase.auth.signOut();
+    };
+
     if (session?.user?.email || session?.user?.name) {
       return {
         user: {
@@ -58,34 +71,25 @@ export function AppAuthProvider({ children }: { children: React.ReactNode }) {
           source: "nextauth",
         },
         loading,
-        signOutAll: async () => {
-          await nextAuthSignOut({ redirect: false });
-          const supabase = getSupabaseBrowserClient();
-          await supabase.auth.signOut();
-        },
+        signOutAll,
+        getSupabaseAccessToken,
       };
     }
     if (supabaseUser) {
       return {
         user: supabaseUser,
         loading,
-        signOutAll: async () => {
-          await nextAuthSignOut({ redirect: false });
-          const supabase = getSupabaseBrowserClient();
-          await supabase.auth.signOut();
-        },
+        signOutAll,
+        getSupabaseAccessToken,
       };
     }
     return {
       user: null,
       loading,
-      signOutAll: async () => {
-        await nextAuthSignOut({ redirect: false });
-        const supabase = getSupabaseBrowserClient();
-        await supabase.auth.signOut();
-      },
+      signOutAll,
+      getSupabaseAccessToken,
     };
-  }, [session?.user, status, supabaseUser]);
+  }, [getSupabaseAccessToken, session?.user, status, supabaseUser]);
 
   return <AppAuthContext.Provider value={value}>{children}</AppAuthContext.Provider>;
 }

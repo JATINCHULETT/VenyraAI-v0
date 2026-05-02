@@ -21,11 +21,11 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useAppAuth } from "@/components/providers/app-auth-provider";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import type { OauthProviderFlags } from "@/lib/auth-provider-flags";
-import { api, type OutputLogFile } from "@/lib/api";
+import { api, type OutputLogFile, type StorageAuthHeaders } from "@/lib/api";
 import { OverviewCharts } from "./OverviewCharts";
 import { WorkspaceTab } from "./WorkspaceTab";
 
@@ -91,10 +91,12 @@ function OutputVault({
   dense = false,
   onViewAll,
   files = [],
+  isGuestSession = false,
 }: {
   dense?: boolean;
   onViewAll?: () => void;
   files?: OutputLogFile[];
+  isGuestSession?: boolean;
 }) {
   const visibleFiles = files.length ? files.slice(0, dense ? 3 : files.length) : [];
   const latestUrl = files[0]?.url ?? null;
@@ -153,7 +155,9 @@ function OutputVault({
           ))
         ) : (
           <li className="rounded-xl border border-[color-mix(in_oklch,var(--border)_38%,transparent)] bg-[var(--bg)]/40 px-4 py-4 text-sm text-[var(--fg-muted)]">
-            No audited outputs yet. Upload a document to generate your first report.
+            {isGuestSession
+              ? "No reports in this guest session yet. After a full refresh, this list resets. Sign in to keep your outputs across visits."
+              : "No audited outputs yet. Upload a document to generate your first report."}
           </li>
         )}
       </ul>
@@ -467,7 +471,37 @@ function MobileNav({ active, onSelect }: { active: Section; onSelect: (s: Sectio
 
 export function HomeDashboard({ oauthProviders }: { oauthProviders: OauthProviderFlags }) {
   const router = useRouter();
-  const { user, signOutAll } = useAppAuth();
+  const { user, signOutAll, getSupabaseAccessToken, loading: authLoading } = useAppAuth();
+  const [guestSessionId, setGuestSessionId] = useState(() =>
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `guest-${Date.now()}`,
+  );
+  const prevHadUser = useRef(false);
+
+  useEffect(() => {
+    if (prevHadUser.current && !user) {
+      setGuestSessionId(
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `guest-${Date.now()}`,
+      );
+    }
+    prevHadUser.current = Boolean(user);
+  }, [user]);
+
+  const buildStorageAuthHeaders = useCallback(async (): Promise<StorageAuthHeaders> => {
+    if (authLoading) return {};
+    const h: StorageAuthHeaders = {};
+    if (user?.source === "supabase") {
+      const token = await getSupabaseAccessToken();
+      if (token) h.Authorization = `Bearer ${token}`;
+    } else if (!user) {
+      h["x-venyra-guest"] = guestSessionId;
+    }
+    return h;
+  }, [authLoading, user, guestSessionId, getSupabaseAccessToken]);
+
   const [section, setSection] = useState<Section>("overview");
   const [email, setEmail] = useState("");
   const [uploadBusy, setUploadBusy] = useState(false);
@@ -490,15 +524,18 @@ export function HomeDashboard({ oauthProviders }: { oauthProviders: OauthProvide
   }, []);
 
   const fetchOutputLogs = useCallback(async () => {
-    const { data, error } = await api.getOutputLogs();
+    const storageAuth = await buildStorageAuthHeaders();
+    const { data, error } = await api.getOutputLogs(storageAuth);
     if (error || !data) return;
     setOutputFiles(data.files);
-  }, []);
+  }, [buildStorageAuthHeaders]);
 
   useEffect(() => {
+    if (authLoading) return;
     let cancelled = false;
     (async () => {
-      const { data, error } = await api.getComplianceStatus();
+      const storageAuth = await buildStorageAuthHeaders();
+      const { data, error } = await api.getComplianceStatus(undefined, storageAuth);
       if (cancelled || error || !data) return;
       const updatedAt = data.updatedAt ? Date.parse(data.updatedAt) : 0;
       const isStale = !updatedAt || Date.now() - updatedAt > STATUS_STALE_MS;
@@ -523,22 +560,24 @@ export function HomeDashboard({ oauthProviders }: { oauthProviders: OauthProvide
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [authLoading, buildStorageAuthHeaders]);
 
   useEffect(() => {
+    if (authLoading) return;
     void fetchOutputLogs();
-  }, [fetchOutputLogs]);
+  }, [authLoading, fetchOutputLogs]);
 
   useEffect(() => {
     if (section === "output") void fetchOutputLogs();
   }, [fetchOutputLogs, section]);
 
   useEffect(() => {
-    if (!jobId) return;
+    if (authLoading || !jobId) return;
     let cancelled = false;
 
     const poll = async () => {
-      const { data, error } = await api.getComplianceStatus(jobId);
+      const storageAuth = await buildStorageAuthHeaders();
+      const { data, error } = await api.getComplianceStatus(jobId, storageAuth);
       if (cancelled || error || !data) return;
       const updatedAt = data.updatedAt ? Date.parse(data.updatedAt) : 0;
       const isStale = !updatedAt || Date.now() - updatedAt > STATUS_STALE_MS;
@@ -567,11 +606,15 @@ export function HomeDashboard({ oauthProviders }: { oauthProviders: OauthProvide
       cancelled = true;
       clearInterval(timer);
     };
-  }, [fetchOutputLogs, jobId]);
+  }, [authLoading, buildStorageAuthHeaders, fetchOutputLogs, jobId]);
 
   const handleFiles = useCallback(
     async (files: FileList | null) => {
       if (!files?.length) return;
+      if (authLoading) {
+        setUploadError("Checking sign-in… try again in a moment.");
+        return;
+      }
       if (!email.trim()) {
         setUploadError("Add your work email so we can route the upload.");
         return;
@@ -592,12 +635,13 @@ export function HomeDashboard({ oauthProviders }: { oauthProviders: OauthProvide
       setUploadError(null);
       setUploadBusy(true);
       try {
+        const storageAuth = await buildStorageAuthHeaders();
         let started = false;
         for (const file of Array.from(files)) {
           const fd = new FormData();
           fd.set("file", file);
           fd.set("email", email.trim());
-          const { data, error } = await api.uploadFiles(fd);
+          const { data, error } = await api.uploadFiles(fd, storageAuth);
           if (error || !data?.ok) {
             const message = error ?? data?.error ?? "Upload failed.";
             setUploadError(message);
@@ -617,7 +661,7 @@ export function HomeDashboard({ oauthProviders }: { oauthProviders: OauthProvide
         setUploadBusy(false);
       }
     },
-    [email],
+    [authLoading, buildStorageAuthHeaders, email, user],
   );
 
   const onSelectSection = (s: Section) => {
@@ -646,13 +690,14 @@ export function HomeDashboard({ oauthProviders }: { oauthProviders: OauthProvide
               pipelineStage={pipelineStage}
               oauthProviders={oauthProviders}
               awsAccountId={process.env.NEXT_PUBLIC_AWS_ACCOUNT_ID}
+              isGuestSession={!user && !authLoading}
             />
         );
         break;
       case "output":
         mainContent = (
           <div className="space-y-6">
-            <OutputVault files={outputFiles} />
+            <OutputVault files={outputFiles} isGuestSession={!user && !authLoading} />
             <HipaaBanner onOpen={() => setWaitlistOpen(true)} />
           </div>
         );
@@ -665,6 +710,7 @@ export function HomeDashboard({ oauthProviders }: { oauthProviders: OauthProvide
               dense
               files={outputFiles}
               onViewAll={() => onSelectSection("output")}
+              isGuestSession={!user && !authLoading}
             />
             <HipaaBanner onOpen={() => setWaitlistOpen(true)} />
           </div>
@@ -672,15 +718,18 @@ export function HomeDashboard({ oauthProviders }: { oauthProviders: OauthProvide
     }
   }
 
-  const displayName = user?.name || user?.email || "Guest";
+  const displayName = user?.name || user?.email || "Browser session";
   const displaySub = user
     ? user.source === "nextauth"
-      ? "Signed in · OAuth or portal"
-      : "Signed in · Supabase"
-    : "Not signed in · local session";
+      ? "Signed in · OAuth"
+      : "Signed in · email"
+    : "Guest · outputs are only for this page load (refresh clears the list)";
+
+  const showSignedInChrome = Boolean(user) && !authLoading;
 
   const onLogout = async () => {
     await signOutAll();
+    router.push("/auth/signin");
     router.refresh();
   };
 
@@ -723,22 +772,26 @@ export function HomeDashboard({ oauthProviders }: { oauthProviders: OauthProvide
               </kbd>
             </div>
             <ThemeToggle />
-            <button
-              type="button"
-              onClick={() => void onLogout()}
-              className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-[color-mix(in_oklch,var(--border)_45%,transparent)] bg-[var(--card)] px-3 text-xs font-medium text-[var(--fg-muted)] transition-colors hover:text-[var(--fg)]"
-              aria-label="Sign out"
-            >
-              <FontAwesomeIcon icon={faArrowRightFromBracket} className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">Log out</span>
-            </button>
-            <span
-              className="hidden h-10 max-w-[10rem] items-center gap-2 truncate rounded-xl border border-[color-mix(in_oklch,var(--border)_45%,transparent)] bg-[var(--card)] px-3 text-xs font-medium text-[var(--fg)] sm:inline-flex"
-              title={user?.email ?? undefined}
-            >
-              <FontAwesomeIcon icon={faCircleUser} className="h-3.5 w-3.5 shrink-0 text-[var(--fg-muted)]" />
-              <span className="truncate">{displayName}</span>
-            </span>
+            {showSignedInChrome ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => void onLogout()}
+                  className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-[color-mix(in_oklch,var(--border)_45%,transparent)] bg-[var(--card)] px-3 text-xs font-medium text-[var(--fg-muted)] transition-colors hover:text-[var(--fg)]"
+                  aria-label="Sign out"
+                >
+                  <FontAwesomeIcon icon={faArrowRightFromBracket} className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">Log out</span>
+                </button>
+                <span
+                  className="hidden h-10 max-w-[10rem] items-center gap-2 truncate rounded-xl border border-[color-mix(in_oklch,var(--border)_45%,transparent)] bg-[var(--card)] px-3 text-xs font-medium text-[var(--fg)] sm:inline-flex"
+                  title={user?.email ?? undefined}
+                >
+                  <FontAwesomeIcon icon={faCircleUser} className="h-3.5 w-3.5 shrink-0 text-[var(--fg-muted)]" />
+                  <span className="truncate">{displayName}</span>
+                </span>
+              </>
+            ) : null}
           </div>
         </header>
 

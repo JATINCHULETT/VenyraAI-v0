@@ -87,6 +87,17 @@ export const authConfig = {
    */
   trustHost: true,
   callbacks: {
+    /** Default post-OAuth destination is /home, not the bare site root (landing). */
+    async redirect({ url, baseUrl }) {
+      try {
+        if (url.startsWith("/")) return `${baseUrl}${url}`;
+        const target = new URL(url);
+        if (target.origin === new URL(baseUrl).origin) return url;
+      } catch {
+        /* ignore malformed url */
+      }
+      return `${baseUrl}/home`;
+    },
     async jwt({ token, account }) {
       if (account?.access_token) {
         token.oauthAccessToken = account.access_token;
@@ -95,13 +106,17 @@ export const authConfig = {
       return token;
     },
     async session({ session, token }) {
+      const next = { ...session };
+      if (token.sub && next.user) {
+        (next.user as { id?: string }).id = token.sub;
+      }
       if (token.oauthAccessToken) {
         return {
-          ...session,
+          ...next,
           accessToken: token.oauthAccessToken as string,
         };
       }
-      return session;
+      return next;
     },
   },
   pages: {

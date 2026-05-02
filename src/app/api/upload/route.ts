@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 
 import { runAuditPipeline } from "@/lib/audit-pipeline";
+import { resolveStorageOwner } from "@/lib/storage-owner";
 import { ensureBucketExists } from "@/lib/supabase-buckets";
 import { getSupabaseServerClient } from "@/lib/supabase";
 import { writePipelineStatus } from "@/lib/pipeline-status";
@@ -14,6 +15,19 @@ export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
+    const owner = await resolveStorageOwner(request);
+    if (owner.kind === "none") {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "Sign in or continue as a guest (refresh starts a new guest session). Missing auth scope.",
+        },
+        { status: 401 },
+      );
+    }
+
+    const ownerKey = owner.key;
     const formData = await request.formData();
     const file = formData.get("file");
     const userEmail = formData.get("email");
@@ -38,7 +52,7 @@ export async function POST(request: Request) {
     const supabase = getSupabaseServerClient();
     await ensureBucketExists(RAW_BUCKET);
     const jobId = randomUUID();
-    const filePath = `uploads/${Date.now()}-${file.name}`;
+    const filePath = `uploads/${ownerKey}/${Date.now()}-${file.name}`;
 
     const { error: uploadError } = await supabase.storage
       .from(RAW_BUCKET)
@@ -58,6 +72,7 @@ export async function POST(request: Request) {
     try {
       await writePipelineStatus({
         jobId,
+        ownerKey,
         filePath,
         stage: "queued",
         progress: 5,
@@ -68,7 +83,12 @@ export async function POST(request: Request) {
       console.warn("Failed to write initial pipeline status", statusError);
     }
 
-    const result = await runAuditPipeline({ filePath, userEmail, jobId });
+    const result = await runAuditPipeline({
+      filePath,
+      userEmail,
+      jobId,
+      ownerKey,
+    });
     if (!result.ok) {
       return NextResponse.json(
         { ok: false, error: result.error ?? "Pipeline failed." },

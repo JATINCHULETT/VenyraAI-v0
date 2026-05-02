@@ -1,5 +1,7 @@
+import type { Session } from "@auth/core/types";
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
+import { auth } from "@/auth";
 import { AppProviders } from "@/components/providers/app-providers";
 import "./globals.css";
 
@@ -15,15 +17,16 @@ export const metadata: Metadata = {
     "Upload your docs. AI handles evidence, controls, and auditor-ready outputs. Built for startups that need calm, inevitable execution.",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const session = (await auth()) as Session | null;
   return (
     <html lang="en" suppressHydrationWarning className={inter.variable}>
       <body className="min-h-screen antialiased">
-        <AppProviders>{children}</AppProviders>
+        <AppProviders session={session}>{children}</AppProviders>
       </body>
     </html>
   );

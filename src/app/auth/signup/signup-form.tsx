@@ -5,7 +5,9 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { signIn } from "next-auth/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useAppAuth } from "@/components/providers/app-auth-provider";
+import { absoluteAuthCallbackUrl } from "@/lib/auth-callback-url";
 import type { OauthProviderFlags } from "@/lib/auth-provider-flags";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 
@@ -17,6 +19,13 @@ export function AuthSignUpForm({
   supabaseReady: boolean;
 }) {
   const router = useRouter();
+  const { user, loading: authLoading } = useAppAuth();
+
+  useEffect(() => {
+    if (authLoading || !user) return;
+    router.replace("/home");
+  }, [authLoading, user, router]);
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -78,7 +87,9 @@ export function AuthSignUpForm({
               ? undefined
               : "Set AUTH_GOOGLE_ID and AUTH_GOOGLE_SECRET for localhost (.env.local) or Vercel."
           }
-          onClick={() => void signIn("google", { callbackUrl: "/home" })}
+          onClick={() =>
+            void signIn("google", { callbackUrl: absoluteAuthCallbackUrl("/home") })
+          }
           className={oauthBtnClass}
         >
           <FontAwesomeIcon icon={faGoogle} className="h-4 w-4" />
@@ -92,7 +103,9 @@ export function AuthSignUpForm({
               ? undefined
               : "Set AUTH_GITHUB_ID and AUTH_GITHUB_SECRET for localhost (.env.local) or Vercel."
           }
-          onClick={() => void signIn("github", { callbackUrl: "/home" })}
+          onClick={() =>
+            void signIn("github", { callbackUrl: absoluteAuthCallbackUrl("/home") })
+          }
           className={oauthBtnClass}
         >
           <FontAwesomeIcon icon={faGithub} className="h-4 w-4" />
@@ -101,7 +114,11 @@ export function AuthSignUpForm({
         {oauth.microsoftEntra && (
           <button
             type="button"
-            onClick={() => void signIn("microsoft-entra-id", { callbackUrl: "/home" })}
+            onClick={() =>
+              void signIn("microsoft-entra-id", {
+                callbackUrl: absoluteAuthCallbackUrl("/home"),
+              })
+            }
             className="flex items-center justify-center gap-2 rounded-xl border border-[color-mix(in_oklch,var(--border)_50%,transparent)] bg-[var(--bg)]/50 py-2.5 text-sm font-medium transition-colors hover:border-[color-mix(in_oklch,var(--accent)_40%,transparent)]"
           >
             <FontAwesomeIcon icon={faMicrosoft} className="h-4 w-4" />

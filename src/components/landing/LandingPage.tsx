@@ -3,6 +3,7 @@
 import {
   faArrowRight,
   faCheck,
+  faCircleUser,
   faMinus,
   faShieldHalved,
 } from "@fortawesome/free-solid-svg-icons";
@@ -10,6 +11,7 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { motion, useReducedMotion, useScroll, useTransform } from "framer-motion";
 import Link from "next/link";
 import { useRef } from "react";
+import { useAppAuth } from "@/components/providers/app-auth-provider";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { HeroScene } from "./HeroScene";
 import { ProductPreview } from "./ProductPreview";
@@ -44,6 +46,10 @@ const COMPARE_ROWS = [
 ];
 
 export function LandingPage() {
+  const { user, loading: authLoading } = useAppAuth();
+  const portalHref = user ? "/home" : "/auth/signin?callbackUrl=/home";
+  const displayName =
+    user?.name?.trim() || user?.email?.trim() || "Account";
   const reduce = useReducedMotion();
   const heroRef = useRef<HTMLDivElement>(null);
   const { scrollYProgress } = useScroll({
@@ -83,25 +89,39 @@ export function LandingPage() {
 
             <div className="flex flex-wrap items-center justify-end gap-1.5 sm:gap-2">
               <ThemeToggle className="h-9 w-9" />
-              <Link
-                href="/auth/signin"
-                className="rounded-full px-3 py-2 text-xs font-medium text-[var(--fg-muted)] transition-colors hover:text-[var(--fg)]"
-              >
-                Sign in
-              </Link>
-              <Link
-                href="/auth/signup"
-                className="rounded-full border border-[color-mix(in_oklch,var(--border)_55%,transparent)] px-3 py-2 text-xs font-semibold text-[var(--fg)] transition-colors hover:border-[color-mix(in_oklch,var(--accent)_40%,transparent)]"
-              >
-                Sign up
-              </Link>
-              <Link
-                href="/home"
-                className="inline-flex items-center gap-1.5 rounded-full bg-[var(--accent)] px-3.5 py-2 text-xs font-semibold text-[var(--accent-foreground)] shadow-[0_0_24px_-6px_var(--glow)] transition-shadow hover:shadow-[0_0_36px_-4px_var(--glow)]"
-              >
-                Get started
-                <FontAwesomeIcon icon={faArrowRight} className="h-2.5 w-2.5" />
-              </Link>
+              {authLoading ? (
+                <span
+                  className="h-9 w-24 shrink-0 rounded-full bg-[color-mix(in_oklch,var(--fg-muted)_12%,transparent)] motion-safe:animate-pulse"
+                  aria-hidden
+                />
+              ) : user ? (
+                <Link
+                  href="/home"
+                  className="inline-flex h-9 max-w-[min(14rem,calc(100vw-12rem))] items-center gap-2 rounded-full border border-[color-mix(in_oklch,var(--border)_45%,transparent)] bg-[color-mix(in_oklch,var(--card)_70%,transparent)] pl-2.5 pr-3 text-xs font-medium text-[var(--fg)] transition-colors hover:border-[color-mix(in_oklch,var(--accent)_35%,transparent)]"
+                  title={user.email ?? user.name ?? undefined}
+                >
+                  <FontAwesomeIcon
+                    icon={faCircleUser}
+                    className="h-3.5 w-3.5 shrink-0 text-[var(--fg-muted)]"
+                  />
+                  <span className="truncate">{displayName}</span>
+                </Link>
+              ) : (
+                <>
+                  <Link
+                    href="/auth/signin"
+                    className="rounded-full px-3 py-2 text-xs font-medium text-[var(--fg-muted)] transition-colors hover:text-[var(--fg)]"
+                  >
+                    Sign in
+                  </Link>
+                  <Link
+                    href="/auth/signup"
+                    className="rounded-full border border-[color-mix(in_oklch,var(--border)_55%,transparent)] px-3 py-2 text-xs font-semibold text-[var(--fg)] transition-colors hover:border-[color-mix(in_oklch,var(--accent)_40%,transparent)]"
+                  >
+                    Sign up
+                  </Link>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -155,7 +175,7 @@ export function LandingPage() {
           >
             <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}>
               <Link
-                href="/home"
+                href={portalHref}
                 className="group inline-flex items-center gap-2 rounded-full bg-[var(--accent)] px-7 py-3.5 text-sm font-semibold text-[var(--accent-foreground)] shadow-[0_8px_32px_-8px_var(--glow)] transition-shadow hover:shadow-[0_12px_48px_-6px_var(--glow)]"
               >
                 Start compliance
@@ -300,7 +320,7 @@ export function LandingPage() {
             <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
               <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}>
                 <Link
-                  href="/home"
+                  href={portalHref}
                   className="inline-flex items-center gap-2 rounded-full bg-[var(--accent)] px-7 py-3.5 text-sm font-semibold text-[var(--accent-foreground)] shadow-[0_8px_32px_-8px_var(--glow)]"
                 >
                   Open client portal

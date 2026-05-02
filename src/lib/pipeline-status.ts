@@ -16,6 +16,8 @@ export type PipelineStage =
 
 export type PipelineStatus = {
   jobId: string;
+  /** Storage isolation key (u-… or g-…). */
+  ownerKey: string;
   filePath: string;
   stage: PipelineStage;
   progress: number;
@@ -27,16 +29,15 @@ export type PipelineStatus = {
 };
 
 const STATUS_BUCKET = "compliance-final-reports";
-const STATUS_PREFIX = "status";
 
-export function getStatusPath(jobId: string) {
-  return `${STATUS_PREFIX}/${jobId}.json`;
+export function getStatusPath(ownerKey: string, jobId: string) {
+  return `status/${ownerKey}/${jobId}.json`;
 }
 
 export async function writePipelineStatus(status: PipelineStatus) {
   const supabase = getSupabaseServerClient();
   await ensureBucketExists(STATUS_BUCKET);
-  const path = getStatusPath(status.jobId);
+  const path = getStatusPath(status.ownerKey, status.jobId);
   const body = Buffer.from(JSON.stringify(status));
 
   const { error } = await supabase.storage.from(STATUS_BUCKET).upload(path, body, {
@@ -51,7 +52,7 @@ export async function writePipelineStatus(status: PipelineStatus) {
   return path;
 }
 
-export async function readPipelineStatus(jobId: string) {
+export async function readPipelineStatus(ownerKey: string, jobId: string) {
   const supabase = getSupabaseServerClient();
   try {
     await ensureBucketExists(STATUS_BUCKET);
@@ -61,7 +62,7 @@ export async function readPipelineStatus(jobId: string) {
   }
   const { data, error } = await supabase.storage
     .from(STATUS_BUCKET)
-    .download(getStatusPath(jobId));
+    .download(getStatusPath(ownerKey, jobId));
 
   if (error || !data) {
     return null;
@@ -75,7 +76,7 @@ export async function readPipelineStatus(jobId: string) {
   }
 }
 
-export async function listLatestPipelineStatus(limit = 1) {
+export async function listLatestPipelineStatusForOwner(ownerKey: string, limit = 1) {
   const supabase = getSupabaseServerClient();
   try {
     await ensureBucketExists(STATUS_BUCKET);
@@ -83,8 +84,10 @@ export async function listLatestPipelineStatus(limit = 1) {
     console.error("Failed to ensure status bucket", error);
     return [] as PipelineStatus[];
   }
-  const { data, error } = await supabase.storage.from(STATUS_BUCKET).list(STATUS_PREFIX, {
-    limit,
+
+  const prefix = `status/${ownerKey}`;
+  const { data, error } = await supabase.storage.from(STATUS_BUCKET).list(prefix, {
+    limit: 40,
     sortBy: { column: "updated_at", order: "desc" },
   });
 
@@ -96,8 +99,9 @@ export async function listLatestPipelineStatus(limit = 1) {
   for (const item of data) {
     if (!item.name.endsWith(".json")) continue;
     const jobId = item.name.replace(/\.json$/, "");
-    const status = await readPipelineStatus(jobId);
+    const status = await readPipelineStatus(ownerKey, jobId);
     if (status) statuses.push(status);
+    if (statuses.length >= limit) break;
   }
 
   return statuses;

@@ -1,16 +1,23 @@
 import { NextResponse } from "next/server";
 
+import { resolveStorageOwner } from "@/lib/storage-owner";
 import { getSupabaseServerClient } from "@/lib/supabase";
 
 const FINAL_BUCKET = "compliance-final-reports";
-const REPORT_PREFIX = "reports";
 const REPORT_LINK_EXPIRY_SECONDS = 60 * 60 * 24;
 
 export const runtime = "nodejs";
 
-export async function GET() {
+export async function GET(request: Request) {
+  const owner = await resolveStorageOwner(request);
+  if (owner.kind === "none") {
+    return NextResponse.json({ files: [] }, { status: 200 });
+  }
+
+  const ownerKey = owner.key;
+  const prefix = `reports/${ownerKey}`;
   const supabase = getSupabaseServerClient();
-  const { data, error } = await supabase.storage.from(FINAL_BUCKET).list(REPORT_PREFIX, {
+  const { data, error } = await supabase.storage.from(FINAL_BUCKET).list(prefix, {
     limit: 25,
     sortBy: { column: "updated_at", order: "desc" },
   });
@@ -23,7 +30,7 @@ export async function GET() {
     data
       .filter((item) => item.name.endsWith(".pdf"))
       .map(async (item) => {
-        const path = `${REPORT_PREFIX}/${item.name}`;
+        const path = `${prefix}/${item.name}`;
         const { data: signed } = await supabase.storage
           .from(FINAL_BUCKET)
           .createSignedUrl(path, REPORT_LINK_EXPIRY_SECONDS);
