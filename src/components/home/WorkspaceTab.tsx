@@ -13,10 +13,10 @@ import { motion } from "framer-motion";
 import { useState } from "react";
 
 const STEPS = [
-  { id: "scan", label: "Scanning infrastructure", note: "Discovering resources & policies" },
-  { id: "map", label: "Mapping controls", note: "Trust Services Criteria" },
-  { id: "draft", label: "Drafting policies", note: "Branded & versioned" },
-  { id: "audit", label: "Ready for auditor", note: "Final review" },
+  { id: "scanning", label: "Scanning document", note: "Indexing evidence" },
+  { id: "ocr", label: "OCR pipeline", note: "Extracting text" },
+  { id: "llm", label: "LLM pipeline", note: "Control mapping" },
+  { id: "report", label: "Audit report", note: "Generate + deliver" },
 ] as const;
 
 const INTEGRATIONS = [
@@ -114,12 +114,12 @@ export function WorkspaceTab({
               <div className="h-2 overflow-hidden rounded-full bg-[color-mix(in_oklch,var(--border)_42%,transparent)]">
                 <motion.div
                   className="h-full rounded-full bg-gradient-to-r from-[var(--accent)] to-[oklch(0.72_0.16_285)] shimmer"
-                  initial={{ width: "5%" }}
-                  animate={{ width: "100%" }}
-                  transition={{ duration: 2.6, ease: "easeInOut" }}
+                  initial={false}
+                  animate={{ width: `${Math.max(6, Math.min(progress, 100))}%` }}
+                  transition={{ type: "spring", stiffness: 120, damping: 18 }}
                 />
               </div>
-              <p className="text-center text-sm text-[var(--fg-muted)]">AI is analyzing your documents…</p>
+              <p className="text-center text-sm text-[var(--fg-muted)]">{aiLine}</p>
             </div>
           ) : (
             <>

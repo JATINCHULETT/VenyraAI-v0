@@ -38,6 +38,15 @@ export function ReadinessRing({ value }: { value: number }) {
   const radius = 78;
   const circumference = 2 * Math.PI * radius;
   const offset = circumference - (Math.min(100, Math.max(0, value)) / 100) * circumference;
+  const round = (num: number) => Math.round(num * 1000) / 1000;
+  const tickMarks = Array.from({ length: 60 }).map((_, i) => {
+    const angle = (i / 60) * 2 * Math.PI - Math.PI / 2;
+    const x1 = round(100 + Math.cos(angle) * (radius + 14));
+    const y1 = round(100 + Math.sin(angle) * (radius + 14));
+    const x2 = round(100 + Math.cos(angle) * (radius + (i % 5 === 0 ? 22 : 18)));
+    const y2 = round(100 + Math.sin(angle) * (radius + (i % 5 === 0 ? 22 : 18)));
+    return { i, x1, y1, x2, y2 };
+  });
 
   return (
     <div className="relative flex h-full w-full flex-col items-center justify-center">
@@ -94,25 +103,18 @@ export function ReadinessRing({ value }: { value: number }) {
         />
 
         {/* Tick marks */}
-        {Array.from({ length: 60 }).map((_, i) => {
-          const angle = (i / 60) * 2 * Math.PI - Math.PI / 2;
-          const x1 = 100 + Math.cos(angle) * (radius + 14);
-          const y1 = 100 + Math.sin(angle) * (radius + 14);
-          const x2 = 100 + Math.cos(angle) * (radius + (i % 5 === 0 ? 22 : 18));
-          const y2 = 100 + Math.sin(angle) * (radius + (i % 5 === 0 ? 22 : 18));
-          return (
-            <line
-              key={i}
-              x1={x1}
-              y1={y1}
-              x2={x2}
-              y2={y2}
-              stroke="color-mix(in oklch, var(--fg-muted) 35%, transparent)"
-              strokeWidth={i % 5 === 0 ? 1.4 : 0.8}
-              opacity={i % 5 === 0 ? 0.7 : 0.35}
-            />
-          );
-        })}
+        {tickMarks.map(({ i, x1, y1, x2, y2 }) => (
+          <line
+            key={i}
+            x1={x1}
+            y1={y1}
+            x2={x2}
+            y2={y2}
+            stroke="color-mix(in oklch, var(--fg-muted) 35%, transparent)"
+            strokeWidth={i % 5 === 0 ? 1.4 : 0.8}
+            opacity={i % 5 === 0 ? 0.7 : 0.35}
+          />
+        ))}
       </svg>
 
       <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">

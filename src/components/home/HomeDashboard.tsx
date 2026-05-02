@@ -20,33 +20,61 @@ import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
-import { api } from "@/lib/api";
+import { api, type OutputLogFile } from "@/lib/api";
 import { OverviewCharts } from "./OverviewCharts";
 import { WorkspaceTab } from "./WorkspaceTab";
 
 type Section = "overview" | "workspace" | "output";
 
-const STEPS = [
-  { id: "scan", label: "Scanning infrastructure" },
-  { id: "map", label: "Mapping controls" },
-  { id: "draft", label: "Drafting policies" },
-  { id: "audit", label: "Ready for auditor" },
-] as const;
-
 const AI_LINES = [
-  "Reviewing your infrastructure…",
-  "Drafting security policies…",
-  "Correlating evidence to CC families…",
-  "Almost ready for audit…",
-  "Packaging auditor deliverables…",
+  "Scanning the document for evidence…",
+  "OCR agents extracting dense tables…",
+  "LLM agents mapping controls…",
+  "Generating the audit report…",
+  "Packaging auditor-ready output…",
 ];
 
-const OUTPUT_FILES = [
-  { name: "Evidence.zip", size: "24 MB", when: "Generated today" },
-  { name: "Policies.pdf", size: "1.2 MB", when: "Generated today" },
-  { name: "Audit checklist", size: "312 KB", when: "Generated yesterday" },
-  { name: "SOC 2 report (draft)", size: "5.6 MB", when: "Generated yesterday" },
-];
+const STAGE_LINES: Record<string, string> = {
+  queued: "Queued for secure processing…",
+  scanning: "Scanning the document for evidence…",
+  ocr: "OCR agents extracting dense tables…",
+  llm: "LLM agents mapping controls…",
+  report: "Generating the audit report…",
+  upload: "Saving the report securely…",
+  email: "Delivering the report by email…",
+  complete: "Audit package delivered.",
+  error: "Pipeline error detected. Retrying…",
+};
+
+const STAGE_TO_STEP: Record<string, number> = {
+  queued: 0,
+  scanning: 0,
+  ocr: 1,
+  llm: 2,
+  report: 3,
+  upload: 3,
+  email: 3,
+  complete: 3,
+  error: 3,
+};
+
+const STATUS_STALE_MS = 10 * 60 * 1000;
+
+const formatBytes = (bytes?: number | null) => {
+  if (!bytes || Number.isNaN(bytes)) return "Unknown size";
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${kb.toFixed(1)} KB`;
+  const mb = kb / 1024;
+  return `${mb.toFixed(1)} MB`;
+};
+
+const formatWhen = (iso?: string | null) => {
+  if (!iso) return "Unknown time";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "Unknown time";
+  return date.toLocaleString();
+};
 
 const NAV: { id: Section; label: string; icon: typeof faChartPie }[] = [
   { id: "overview", label: "Overview", icon: faChartPie },
@@ -54,7 +82,22 @@ const NAV: { id: Section; label: string; icon: typeof faChartPie }[] = [
   { id: "output", label: "Output", icon: faBoxArchive },
 ];
 
-function OutputVault({ dense = false, onViewAll }: { dense?: boolean; onViewAll?: () => void }) {
+function OutputVault({
+  dense = false,
+  onViewAll,
+  files = [],
+}: {
+  dense?: boolean;
+  onViewAll?: () => void;
+  files?: OutputLogFile[];
+}) {
+  const visibleFiles = files.length ? files.slice(0, dense ? 3 : files.length) : [];
+  const latestUrl = files[0]?.url ?? null;
+  const handleDownload = () => {
+    if (!latestUrl) return;
+    window.open(latestUrl, "_blank", "noopener,noreferrer");
+  };
+
   return (
     <div
       className={`rounded-2xl border border-[color-mix(in_oklch,var(--border)_45%,transparent)] bg-[color-mix(in_oklch,var(--card)_90%,transparent)] glow-border ${dense ? "p-5" : "p-6 md:p-8"}`}
@@ -65,9 +108,9 @@ function OutputVault({ dense = false, onViewAll }: { dense?: boolean; onViewAll?
             <FontAwesomeIcon icon={faBoxArchive} className="h-5 w-5" />
           </span>
           <div>
-            <h3 className="text-base font-semibold tracking-tight">Auditor-ready package</h3>
+            <h3 className="text-base font-semibold tracking-tight">Audited outputs</h3>
             <p className="mt-1 text-sm text-[var(--fg-muted)]">
-              Dated, attributed, exportable.
+              Previously audited reports, dated and exportable.
             </p>
           </div>
         </div>
@@ -78,29 +121,36 @@ function OutputVault({ dense = false, onViewAll }: { dense?: boolean; onViewAll?
       </div>
 
       <ul className={`space-y-2 ${dense ? "mt-4" : "mt-6 space-y-3"}`}>
-        {OUTPUT_FILES.slice(0, dense ? 3 : OUTPUT_FILES.length).map((f, i) => (
-          <motion.li
-            key={f.name}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.05 }}
-            className="flex items-center justify-between rounded-xl border border-[color-mix(in_oklch,var(--border)_38%,transparent)] bg-[var(--bg)]/50 px-3.5 py-3 glow-border-hover"
-          >
-            <div className="min-w-0">
-              <p className="truncate text-sm font-medium">{f.name}</p>
-              <p className="text-xs text-[var(--fg-muted)]">
-                {f.size} · {f.when}
-              </p>
-            </div>
-            <button
-              type="button"
-              className="ml-3 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[var(--fg-muted)] transition-colors hover:bg-[color-mix(in_oklch,var(--accent)_12%,transparent)] hover:text-[var(--accent)]"
-              aria-label={`Download ${f.name}`}
+        {visibleFiles.length ? (
+          visibleFiles.map((f, i) => (
+            <motion.li
+              key={f.path}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: i * 0.05 }}
+              className="flex items-center justify-between rounded-xl border border-[color-mix(in_oklch,var(--border)_38%,transparent)] bg-[var(--bg)]/50 px-3.5 py-3 glow-border-hover"
             >
-              <FontAwesomeIcon icon={faDownload} className="h-4 w-4" />
-            </button>
-          </motion.li>
-        ))}
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium">{f.name}</p>
+                <p className="text-xs text-[var(--fg-muted)]">
+                  {formatBytes(f.size)} · {formatWhen(f.updatedAt)}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => f.url && window.open(f.url, "_blank", "noopener,noreferrer")}
+                className="ml-3 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[var(--fg-muted)] transition-colors hover:bg-[color-mix(in_oklch,var(--accent)_12%,transparent)] hover:text-[var(--accent)]"
+                aria-label={`Download ${f.name}`}
+              >
+                <FontAwesomeIcon icon={faDownload} className="h-4 w-4" />
+              </button>
+            </motion.li>
+          ))
+        ) : (
+          <li className="rounded-xl border border-[color-mix(in_oklch,var(--border)_38%,transparent)] bg-[var(--bg)]/40 px-4 py-4 text-sm text-[var(--fg-muted)]">
+            No audited outputs yet. Upload a document to generate your first report.
+          </li>
+        )}
       </ul>
 
       {dense && onViewAll && (
@@ -117,9 +167,11 @@ function OutputVault({ dense = false, onViewAll }: { dense?: boolean; onViewAll?
       {!dense && (
         <motion.button
           type="button"
+          onClick={handleDownload}
           whileHover={{ scale: 1.01 }}
           whileTap={{ scale: 0.99 }}
           className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-[var(--accent)] py-3.5 text-sm font-semibold text-[var(--accent-foreground)] shadow-[0_0_40px_-12px_var(--glow)] glow-border-hover"
+          aria-disabled={!latestUrl}
         >
           <FontAwesomeIcon icon={faDownload} className="h-4 w-4 opacity-90" />
           Download auditor-ready package
@@ -153,6 +205,39 @@ function HipaaBanner({ onOpen }: { onOpen: () => void }) {
 }
 
 function WaitlistModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [waitlistEmail, setWaitlistEmail] = useState("");
+  const [waitlistBusy, setWaitlistBusy] = useState(false);
+  const [waitlistSent, setWaitlistSent] = useState(false);
+  const [waitlistError, setWaitlistError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setWaitlistEmail("");
+    setWaitlistBusy(false);
+    setWaitlistSent(false);
+    setWaitlistError(null);
+  }, [open]);
+
+  const handleWaitlist = async () => {
+    const email = waitlistEmail.trim();
+    if (!email) {
+      setWaitlistError("Enter a work email to continue.");
+      return;
+    }
+
+    setWaitlistBusy(true);
+    setWaitlistError(null);
+    const { data, error } = await api.joinWaitlist(email);
+    if (error || !data?.ok) {
+      setWaitlistError(error ?? data?.error ?? "Failed to submit waitlist.");
+      setWaitlistBusy(false);
+      return;
+    }
+
+    setWaitlistSent(true);
+    setWaitlistBusy(false);
+  };
+
   return (
     <AnimatePresence mode="wait">
       {open ? (
@@ -206,9 +291,20 @@ function WaitlistModal({ open, onClose }: { open: boolean; onClose: () => void }
                   id="waitlist-email"
                   type="email"
                   placeholder="Work email"
+                  value={waitlistEmail}
+                  onChange={(e) => setWaitlistEmail(e.target.value)}
+                  disabled={waitlistBusy || waitlistSent}
                   className="min-w-0 flex-1 bg-transparent py-2 text-sm outline-none"
                 />
               </div>
+              {waitlistError && (
+                <p className="mt-2 text-xs text-rose-400">{waitlistError}</p>
+              )}
+              {waitlistSent && (
+                <p className="mt-2 text-xs text-emerald-400">
+                  Thanks! We will reach out with early access details.
+                </p>
+              )}
             </div>
             <div className="mt-6 flex justify-end gap-2">
               <button
@@ -220,10 +316,11 @@ function WaitlistModal({ open, onClose }: { open: boolean; onClose: () => void }
               </button>
               <button
                 type="button"
-                onClick={onClose}
-                className="inline-flex items-center gap-2 rounded-xl bg-[var(--accent)] px-4 py-2.5 text-sm font-semibold text-[var(--accent-foreground)] shadow-[0_0_24px_-8px_var(--glow)]"
+                onClick={handleWaitlist}
+                disabled={waitlistBusy}
+                className="inline-flex items-center gap-2 rounded-xl bg-[var(--accent)] px-4 py-2.5 text-sm font-semibold text-[var(--accent-foreground)] shadow-[0_0_24px_-8px_var(--glow)] disabled:cursor-not-allowed disabled:opacity-70"
               >
-                Request early access
+                {waitlistBusy ? "Sending…" : "Request early access"}
                 <FontAwesomeIcon icon={faArrowRight} className="h-3 w-3" />
               </button>
             </div>
@@ -364,16 +461,26 @@ export function HomeDashboard() {
   const [email, setEmail] = useState("");
   const [uploadBusy, setUploadBusy] = useState(false);
   const [waitlistOpen, setWaitlistOpen] = useState(false);
-  const [activeStep, setActiveStep] = useState(2);
-  const [progress, setProgress] = useState(82);
+  const [activeStep, setActiveStep] = useState(0);
+  const [progress, setProgress] = useState(0);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [pipelineStage, setPipelineStage] = useState("queued");
+  const [pipelineActive, setPipelineActive] = useState(false);
+  const [outputFiles, setOutputFiles] = useState<OutputLogFile[]>([]);
   const [aiLineIdx, setAiLineIdx] = useState(0);
   const [loadingSection, setLoadingSection] = useState(false);
 
-  const aiLine = AI_LINES[aiLineIdx % AI_LINES.length];
+  const aiLine = STAGE_LINES[pipelineStage] ?? AI_LINES[aiLineIdx % AI_LINES.length];
 
   useEffect(() => {
     const t = setInterval(() => setAiLineIdx((i) => i + 1), 4200);
     return () => clearInterval(t);
+  }, []);
+
+  const fetchOutputLogs = useCallback(async () => {
+    const { data, error } = await api.getOutputLogs();
+    if (error || !data) return;
+    setOutputFiles(data.files);
   }, []);
 
   useEffect(() => {
@@ -381,19 +488,73 @@ export function HomeDashboard() {
     (async () => {
       const { data, error } = await api.getComplianceStatus();
       if (cancelled || error || !data) return;
+      const updatedAt = data.updatedAt ? Date.parse(data.updatedAt) : 0;
+      const isStale = !updatedAt || Date.now() - updatedAt > STATUS_STALE_MS;
+
+      if (isStale) {
+        setPipelineActive(false);
+        setPipelineStage("queued");
+        setProgress(0);
+        setActiveStep(0);
+        setJobId(null);
+        return;
+      }
+
       if (typeof data.progress === "number") setProgress(data.progress);
-      const idx = STEPS.findIndex((s) => s.id === data.stage || s.label === data.stage);
-      if (idx >= 0) setActiveStep(idx);
+      if (data.stage) {
+        setPipelineStage(data.stage);
+        setActiveStep(STAGE_TO_STEP[data.stage] ?? 0);
+        setPipelineActive(!["complete", "error"].includes(data.stage));
+      }
+      if (data.jobId) setJobId(data.jobId);
     })();
     return () => {
       cancelled = true;
     };
   }, []);
 
-  const simulateProgress = useCallback(() => {
-    setProgress((p) => Math.min(99, p + 4));
-    setActiveStep((s) => Math.min(STEPS.length - 1, s + (Math.random() > 0.7 ? 1 : 0)));
-  }, []);
+  useEffect(() => {
+    void fetchOutputLogs();
+  }, [fetchOutputLogs]);
+
+  useEffect(() => {
+    if (section === "output") void fetchOutputLogs();
+  }, [fetchOutputLogs, section]);
+
+  useEffect(() => {
+    if (!jobId) return;
+    let cancelled = false;
+
+    const poll = async () => {
+      const { data, error } = await api.getComplianceStatus(jobId);
+      if (cancelled || error || !data) return;
+      const updatedAt = data.updatedAt ? Date.parse(data.updatedAt) : 0;
+      const isStale = !updatedAt || Date.now() - updatedAt > STATUS_STALE_MS;
+      if (isStale) {
+        setPipelineActive(false);
+        setPipelineStage("queued");
+        setProgress(0);
+        setActiveStep(0);
+        setJobId(null);
+        return;
+      }
+      if (typeof data.progress === "number") setProgress(data.progress);
+      if (data.stage) {
+        setPipelineStage(data.stage);
+        setActiveStep(STAGE_TO_STEP[data.stage] ?? 0);
+        const done = ["complete", "error"].includes(data.stage);
+        setPipelineActive(!done);
+        if (done) void fetchOutputLogs();
+      }
+    };
+
+    void poll();
+    const timer = setInterval(poll, 2500);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [fetchOutputLogs, jobId]);
 
   const handleFiles = useCallback(
     async (files: FileList | null) => {
@@ -404,6 +565,7 @@ export function HomeDashboard() {
       }
       setUploadBusy(true);
       try {
+        let started = false;
         for (const file of Array.from(files)) {
           const fd = new FormData();
           fd.set("file", file);
@@ -411,15 +573,22 @@ export function HomeDashboard() {
           const { data, error } = await api.uploadFiles(fd);
           if (error || !data?.ok) {
             console.warn(error ?? data);
+            continue;
           }
+          if (data.jobId) setJobId(data.jobId);
+          started = true;
         }
-        await new Promise((r) => setTimeout(r, 1800));
-        simulateProgress();
+        if (started) {
+          setPipelineActive(true);
+          setPipelineStage("queued");
+          setActiveStep(0);
+          setProgress(5);
+        }
       } finally {
         setUploadBusy(false);
       }
     },
-    [email, simulateProgress],
+    [email],
   );
 
   const onSelectSection = (s: Section) => {
@@ -435,21 +604,21 @@ export function HomeDashboard() {
     switch (section) {
       case "workspace":
         mainContent = (
-          <WorkspaceTab
-            email={email}
-            setEmail={setEmail}
-            busy={uploadBusy}
-            onFiles={handleFiles}
-            activeStep={activeStep}
-            progress={progress}
-            aiLine={aiLine}
-          />
+            <WorkspaceTab
+              email={email}
+              setEmail={setEmail}
+              busy={uploadBusy || (pipelineActive && Boolean(jobId))}
+              onFiles={handleFiles}
+              activeStep={activeStep}
+              progress={progress}
+              aiLine={aiLine}
+            />
         );
         break;
       case "output":
         mainContent = (
           <div className="space-y-6">
-            <OutputVault />
+            <OutputVault files={outputFiles} />
             <HipaaBanner onOpen={() => setWaitlistOpen(true)} />
           </div>
         );
@@ -458,7 +627,11 @@ export function HomeDashboard() {
         mainContent = (
           <div className="space-y-6">
             <OverviewCharts readiness={progress} />
-            <OutputVault dense onViewAll={() => onSelectSection("output")} />
+            <OutputVault
+              dense
+              files={outputFiles}
+              onViewAll={() => onSelectSection("output")}
+            />
             <HipaaBanner onOpen={() => setWaitlistOpen(true)} />
           </div>
         );

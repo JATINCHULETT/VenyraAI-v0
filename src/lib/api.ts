@@ -44,6 +44,7 @@ async function request<T>(
 export type UploadResponse = {
   ok: boolean;
   filePath?: string;
+  jobId?: string;
   error?: string;
 };
 
@@ -51,6 +52,27 @@ export type ComplianceStatusResponse = {
   progress: number;
   stage: string;
   updatedAt?: string;
+  reportFilePath?: string;
+  reportUrl?: string;
+  error?: string;
+  jobId?: string;
+};
+
+export type OutputLogFile = {
+  name: string;
+  path: string;
+  size: number | null;
+  updatedAt: string | null;
+  url: string | null;
+};
+
+export type OutputLogsResponse = {
+  files: OutputLogFile[];
+};
+
+export type WaitlistResponse = {
+  ok: boolean;
+  error?: string;
 };
 
 export const api = {
@@ -60,6 +82,16 @@ export const api = {
       body: formData,
     }),
 
-  getComplianceStatus: () =>
-    request<ComplianceStatusResponse>("/api/compliance/status"),
+  getComplianceStatus: (jobId?: string) =>
+    request<ComplianceStatusResponse>(
+      jobId ? `/api/compliance/status?jobId=${encodeURIComponent(jobId)}` : "/api/compliance/status"
+    ),
+
+  getOutputLogs: () => request<OutputLogsResponse>("/api/output/logs"),
+
+  joinWaitlist: (email: string) =>
+    request<WaitlistResponse>("/api/waitlist", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
 };

@@ -1,9 +1,12 @@
 import { Buffer } from "node:buffer";
+import { randomUUID } from "node:crypto";
 
 import { NextResponse } from "next/server";
 
-import { inngest } from "@/inngest/client";
+import { runAuditPipeline } from "@/lib/audit-pipeline";
+import { ensureBucketExists } from "@/lib/supabase-buckets";
 import { getSupabaseServerClient } from "@/lib/supabase";
+import { writePipelineStatus } from "@/lib/pipeline-status";
 
 const RAW_BUCKET = "compliance-raw-docs";
 
@@ -33,6 +36,8 @@ export async function POST(request: Request) {
     const fileBuffer = Buffer.from(arrayBuffer);
 
     const supabase = getSupabaseServerClient();
+    await ensureBucketExists(RAW_BUCKET);
+    const jobId = randomUUID();
     const filePath = `uploads/${Date.now()}-${file.name}`;
 
     const { error: uploadError } = await supabase.storage
@@ -43,19 +48,46 @@ export async function POST(request: Request) {
       });
 
     if (uploadError) {
+      console.error("Supabase upload failed", uploadError);
       return NextResponse.json(
         { ok: false, error: uploadError.message },
         { status: 500 }
       );
     }
 
-    await inngest.send({
-      name: "audit.process",
-      data: { filePath, userEmail },
-    });
+    try {
+      await writePipelineStatus({
+        jobId,
+        filePath,
+        stage: "queued",
+        progress: 5,
+        updatedAt: new Date().toISOString(),
+        email: userEmail,
+      });
+    } catch (statusError) {
+      console.warn("Failed to write initial pipeline status", statusError);
+    }
 
-    return NextResponse.json({ ok: true, filePath }, { status: 200 });
+    const result = await runAuditPipeline({ filePath, userEmail, jobId });
+    if (!result.ok) {
+      return NextResponse.json(
+        { ok: false, error: result.error ?? "Pipeline failed." },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json(
+      {
+        ok: true,
+        filePath,
+        jobId,
+        reportFilePath: result.reportFilePath,
+        reportUrl: result.reportUrl,
+      },
+      { status: 200 }
+    );
   } catch (error) {
+    console.error("Upload route failed", error);
     const message = error instanceof Error ? error.message : "Unknown error";
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
