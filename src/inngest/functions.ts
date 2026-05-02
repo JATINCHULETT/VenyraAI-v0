@@ -91,9 +91,15 @@ export const auditProcess = inngest.createFunction(
         const timestamp = Date.now();
         const outputPath = `reports/${baseName}-${timestamp}.pdf`;
 
+        const pdfBody = Buffer.isBuffer(reportBuffer)
+          ? reportBuffer
+          : Buffer.from(
+              (reportBuffer as { data?: number[] }).data ?? [],
+            );
+
         const { error } = await supabase.storage
           .from(FINAL_BUCKET)
-          .upload(outputPath, reportBuffer, {
+          .upload(outputPath, pdfBody, {
             contentType: "application/pdf",
             upsert: true,
           });

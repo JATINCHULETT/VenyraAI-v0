@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180">
+  <rect width="180" height="180" rx="40" fill="#4F46E5"/>
+  <path
+    d="M90 42L46 66v48l44 24 44-24V66L90 42z"
+    stroke="white"
+    stroke-width="8"
+    stroke-linejoin="round"
+    fill="none"
+    opacity="0.95"
+  />
+  <path d="M90 90l44-24" stroke="white" stroke-width="6" stroke-linecap="round" opacity="0.5"/>
+</svg>

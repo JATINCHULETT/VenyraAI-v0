@@ -9,7 +9,12 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@fortawesome/fontawesome-svg-core": "^7.2.0",
+    "@fortawesome/free-brands-svg-icons": "^7.2.0",
+    "@fortawesome/free-solid-svg-icons": "^7.2.0",
+    "@fortawesome/react-fontawesome": "^3.3.1",
     "@supabase/supabase-js": "^2.50.2",
+    "framer-motion": "^12.38.0",
     "inngest": "^3.28.3",
     "md-to-pdf": "^5.2.5",
     "next": "16.2.4",
@@ -20,11 +25,14 @@
     "resend": "^4.3.0"
   },
   "devDependencies": {
+    "@tailwindcss/postcss": "^4.2.4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.4",
+    "postcss": "^8.5.13",
+    "tailwindcss": "^4.2.4",
     "typescript": "^5"
   }
 }
