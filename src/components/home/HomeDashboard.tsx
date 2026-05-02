@@ -460,6 +460,7 @@ export function HomeDashboard() {
   const [section, setSection] = useState<Section>("overview");
   const [email, setEmail] = useState("");
   const [uploadBusy, setUploadBusy] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [waitlistOpen, setWaitlistOpen] = useState(false);
   const [activeStep, setActiveStep] = useState(0);
   const [progress, setProgress] = useState(0);
@@ -546,6 +547,7 @@ export function HomeDashboard() {
         setPipelineActive(!done);
         if (done) void fetchOutputLogs();
       }
+      if (data.error) setUploadError(data.error);
     };
 
     void poll();
@@ -560,9 +562,23 @@ export function HomeDashboard() {
     async (files: FileList | null) => {
       if (!files?.length) return;
       if (!email.trim()) {
-        alert("Please enter your work email so we can route your upload.");
+        setUploadError("Add your work email so we can route the upload.");
         return;
       }
+
+      // pdf-parse only handles PDFs — reject other file types up front
+      // with a clear message instead of letting the pipeline silently fail.
+      const invalid = Array.from(files).find(
+        (f) => !/\.pdf$/i.test(f.name) && f.type !== "application/pdf",
+      );
+      if (invalid) {
+        setUploadError(
+          `"${invalid.name}" isn't a PDF. The processing pipeline currently supports PDFs only.`,
+        );
+        return;
+      }
+
+      setUploadError(null);
       setUploadBusy(true);
       try {
         let started = false;
@@ -572,7 +588,9 @@ export function HomeDashboard() {
           fd.set("email", email.trim());
           const { data, error } = await api.uploadFiles(fd);
           if (error || !data?.ok) {
-            console.warn(error ?? data);
+            const message = error ?? data?.error ?? "Upload failed.";
+            setUploadError(message);
+            console.warn("Upload failed:", message);
             continue;
           }
           if (data.jobId) setJobId(data.jobId);
@@ -612,6 +630,9 @@ export function HomeDashboard() {
               activeStep={activeStep}
               progress={progress}
               aiLine={aiLine}
+              uploadError={uploadError}
+              dismissError={() => setUploadError(null)}
+              pipelineStage={pipelineStage}
             />
         );
         break;

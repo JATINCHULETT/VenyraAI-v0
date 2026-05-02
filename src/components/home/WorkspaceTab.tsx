@@ -3,9 +3,11 @@
 import {
   faArrowsRotate,
   faCircleCheck,
+  faCircleExclamation,
   faCloudArrowUp,
   faKey,
   faPlus,
+  faXmark,
 } from "@fortawesome/free-solid-svg-icons";
 import { faAws, faGithub, faGoogle, faMicrosoft } from "@fortawesome/free-brands-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
@@ -41,6 +43,9 @@ export function WorkspaceTab({
   activeStep,
   progress,
   aiLine,
+  uploadError,
+  dismissError,
+  pipelineStage,
 }: {
   email: string;
   setEmail: (v: string) => void;
@@ -49,11 +54,49 @@ export function WorkspaceTab({
   activeStep: number;
   progress: number;
   aiLine: string;
+  uploadError?: string | null;
+  dismissError?: () => void;
+  pipelineStage?: string;
 }) {
   const [drag, setDrag] = useState(false);
 
   return (
     <div className="space-y-6">
+      {/* Upload error banner */}
+      {uploadError && (
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0 }}
+          role="alert"
+          className="flex items-start justify-between gap-3 rounded-2xl border border-rose-500/35 bg-rose-500/10 px-4 py-3.5"
+        >
+          <div className="flex items-start gap-3">
+            <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-rose-500/15 text-rose-500">
+              <FontAwesomeIcon icon={faCircleExclamation} className="h-4 w-4" />
+            </span>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-rose-700 dark:text-rose-300">
+                Upload couldn&apos;t complete
+              </p>
+              <p className="mt-0.5 break-words text-xs text-rose-600/90 dark:text-rose-300/85">
+                {uploadError}
+              </p>
+            </div>
+          </div>
+          {dismissError && (
+            <button
+              type="button"
+              onClick={dismissError}
+              aria-label="Dismiss"
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-rose-500 transition-colors hover:bg-rose-500/10"
+            >
+              <FontAwesomeIcon icon={faXmark} className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </motion.div>
+      )}
+
       {/* ── Upload zone ── */}
       <div className="rounded-2xl border border-[color-mix(in_oklch,var(--border)_42%,transparent)] bg-[color-mix(in_oklch,var(--card)_90%,transparent)] p-6 md:p-8 glow-border">
         <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
@@ -64,7 +107,7 @@ export function WorkspaceTab({
             <div>
               <h3 className="text-base font-semibold tracking-tight">Drop documents</h3>
               <p className="mt-1 text-sm text-[var(--fg-muted)]">
-                Policies, contracts, questionnaires — TLS in transit.
+                PDFs only — TLS in transit, processed by Gemini.
               </p>
             </div>
           </div>
@@ -106,7 +149,7 @@ export function WorkspaceTab({
             type="file"
             className="hidden"
             multiple
-            accept=".pdf,.doc,.docx,.txt"
+            accept="application/pdf,.pdf"
             onChange={(e) => onFiles(e.target.files)}
           />
           {busy ? (
@@ -120,12 +163,17 @@ export function WorkspaceTab({
                 />
               </div>
               <p className="text-center text-sm text-[var(--fg-muted)]">{aiLine}</p>
+              {pipelineStage && (
+                <p className="text-center text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--fg-muted)]">
+                  Stage · {pipelineStage}
+                </p>
+              )}
             </div>
           ) : (
             <>
               <FontAwesomeIcon icon={faCloudArrowUp} className="h-8 w-8 text-[var(--fg-muted)] opacity-70" />
-              <p className="mt-3 text-center text-sm font-medium">Drag &amp; drop or click to browse</p>
-              <p className="mt-1.5 text-center text-xs text-[var(--fg-muted)]">PDF · Word · plain text</p>
+              <p className="mt-3 text-center text-sm font-medium">Drag &amp; drop a PDF or click to browse</p>
+              <p className="mt-1.5 text-center text-xs text-[var(--fg-muted)]">PDF only · OCR + Gemini 2.5 Flash</p>
             </>
           )}
         </div>

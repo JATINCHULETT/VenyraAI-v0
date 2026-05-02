@@ -267,20 +267,34 @@ export async function runAuditPipeline({
     await updateStatus("email", 94, { reportFilePath, reportUrl });
     const resendApiKey = process.env.RESEND_API_KEY;
     const resendFromEmail = process.env.RESEND_FROM_EMAIL;
-    if (!resendApiKey || !resendFromEmail) {
-      throw new Error("Missing RESEND_API_KEY or RESEND_FROM_EMAIL.");
-    }
 
-    const resend = new Resend(resendApiKey);
-    await resend.emails.send({
-      from: resendFromEmail,
-      to: userEmail,
-      subject: "Your SOC 2 Gap Analysis Report",
-      html: `
-        <p>Your SOC 2 gap analysis report is ready.</p>
-        <p><a href="${reportUrl}">Download the report</a></p>
-      `,
-    });
+    // Email delivery is best-effort. If Resend isn't configured (or the
+    // request fails), the report is still considered ready — the user can
+    // download it from the output room. This keeps "document processed"
+    // decoupled from the optional notification step.
+    if (resendApiKey && resendFromEmail) {
+      try {
+        const resend = new Resend(resendApiKey);
+        await resend.emails.send({
+          from: resendFromEmail,
+          to: userEmail,
+          subject: "Your SOC 2 Gap Analysis Report",
+          html: `
+            <p>Your SOC 2 gap analysis report is ready.</p>
+            <p><a href="${reportUrl}">Download the report</a></p>
+          `,
+        });
+      } catch (emailError) {
+        console.warn(
+          "Email delivery skipped — report is still available in the output room.",
+          emailError,
+        );
+      }
+    } else {
+      console.info(
+        "RESEND_API_KEY / RESEND_FROM_EMAIL not configured — skipping email delivery.",
+      );
+    }
 
     await updateStatus("complete", 100, { reportFilePath, reportUrl });
 
