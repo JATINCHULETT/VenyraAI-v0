@@ -11,8 +11,20 @@ import {
 } from "@fortawesome/free-solid-svg-icons";
 import { faAws, faGithub, faGoogle, faMicrosoft } from "@fortawesome/free-brands-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { motion } from "framer-motion";
-import { useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import { signIn, useSession } from "next-auth/react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { OauthProviderFlags } from "@/lib/auth-provider-flags";
+import {
+  awsIamCreateRoleUrl,
+  fetchIntegrationMetadata,
+  isValidAwsRoleArn,
+  isValidOktaDomainInput,
+  loadIntegrationSnapshots,
+  persistIntegrationSnapshots,
+  type CloudProviderKey,
+  type IntegrationSnapshot,
+} from "@/lib/cloud-integrations";
 
 const STEPS = [
   { id: "scanning", label: "Scanning document", note: "Indexing evidence" },
@@ -21,12 +33,52 @@ const STEPS = [
   { id: "report", label: "Audit report", note: "Generate + deliver" },
 ] as const;
 
-const INTEGRATIONS = [
-  { name: "AWS", icon: faAws, status: "connected" as const, scope: "Read-only · 14 services" },
-  { name: "GitHub", icon: faGithub, status: "connected" as const, scope: "Read-only · 8 repos" },
-  { name: "Okta", icon: faKey, status: "connected" as const, scope: "Read-only · SSO + MFA" },
-  { name: "GCP", icon: faGoogle, status: "available" as const, scope: "Connect read-only" },
-  { name: "Azure", icon: faMicrosoft, status: "available" as const, scope: "Connect read-only" },
+const PENDING_PROVIDER_KEY = "venyra-pending-provider";
+
+type IntegrationRow = {
+  id: CloudProviderKey;
+  name: string;
+  icon: typeof faAws;
+  defaultScope: string;
+  defaultStatus: IntegrationSnapshot["status"];
+};
+
+const INTEGRATION_ROWS: IntegrationRow[] = [
+  {
+    id: "aws",
+    name: "AWS",
+    icon: faAws,
+    defaultScope: "Read-only · IAM role",
+    defaultStatus: "available",
+  },
+  {
+    id: "github",
+    name: "GitHub",
+    icon: faGithub,
+    defaultScope: "repo + read:org",
+    defaultStatus: "available",
+  },
+  {
+    id: "okta",
+    name: "Okta",
+    icon: faKey,
+    defaultScope: "Domain + API token",
+    defaultStatus: "available",
+  },
+  {
+    id: "gcp",
+    name: "GCP",
+    icon: faGoogle,
+    defaultScope: "cloud-platform.read-only",
+    defaultStatus: "available",
+  },
+  {
+    id: "azure",
+    name: "Azure",
+    icon: faMicrosoft,
+    defaultScope: "ARM + monitoring read",
+    defaultStatus: "available",
+  },
 ];
 
 const RECENT_FILES = [
@@ -46,6 +98,8 @@ export function WorkspaceTab({
   uploadError,
   dismissError,
   pipelineStage,
+  oauthProviders,
+  awsAccountId,
 }: {
   email: string;
   setEmail: (v: string) => void;
@@ -57,8 +111,165 @@ export function WorkspaceTab({
   uploadError?: string | null;
   dismissError?: () => void;
   pipelineStage?: string;
+  oauthProviders: OauthProviderFlags;
+  awsAccountId?: string;
 }) {
+  const { status } = useSession();
   const [drag, setDrag] = useState(false);
+  const [snapshots, setSnapshots] = useState<Partial<Record<CloudProviderKey, IntegrationSnapshot>>>(
+    {},
+  );
+  const [awsOpen, setAwsOpen] = useState(false);
+  const [awsArn, setAwsArn] = useState("");
+  const [awsError, setAwsError] = useState<string | null>(null);
+  const [oktaOpen, setOktaOpen] = useState(false);
+  const [oktaDomain, setOktaDomain] = useState("");
+  const [oktaToken, setOktaToken] = useState("");
+  const [oktaError, setOktaError] = useState<string | null>(null);
+  const [connectError, setConnectError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSnapshots(loadIntegrationSnapshots());
+  }, []);
+
+  const persist = useCallback((next: Partial<Record<CloudProviderKey, IntegrationSnapshot>>) => {
+    setSnapshots((prev) => {
+      const merged = { ...prev, ...next };
+      persistIntegrationSnapshots(merged);
+      return merged;
+    });
+  }, []);
+
+  const runConnectPipeline = useCallback(
+    async (id: CloudProviderKey, detail?: string) => {
+      persist({ [id]: { status: "connecting", detail } });
+      try {
+        const meta = await fetchIntegrationMetadata(id);
+        persist({
+          [id]: { status: "live", detail, meta },
+        });
+      } catch {
+        persist({ [id]: { status: "available", detail } });
+        setConnectError(`Could not finish ${id.toUpperCase()} connection. Try again.`);
+      }
+    },
+    [persist],
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (status !== "authenticated") return;
+    const raw = sessionStorage.getItem(PENDING_PROVIDER_KEY);
+    if (!raw) return;
+    sessionStorage.removeItem(PENDING_PROVIDER_KEY);
+    const id = raw as CloudProviderKey;
+    if (!INTEGRATION_ROWS.some((r) => r.id === id)) return;
+    void runConnectPipeline(id);
+  }, [status, runConnectPipeline]);
+
+  const liveCount = useMemo(
+    () => INTEGRATION_ROWS.filter((r) => snapshots[r.id]?.status === "live").length,
+    [snapshots],
+  );
+
+  const startGcpConnect = () => {
+    if (!oauthProviders.google) {
+      setConnectError("Configure Google OAuth (AUTH_GOOGLE_*) to connect GCP.");
+      return;
+    }
+    setConnectError(null);
+    sessionStorage.setItem(PENDING_PROVIDER_KEY, "gcp");
+    void signIn("google", {
+      callbackUrl: window.location.href,
+      authorizationParams: {
+        scope:
+          "openid email profile https://www.googleapis.com/auth/cloud-platform.read-only",
+        access_type: "offline",
+        prompt: "consent",
+      },
+    });
+  };
+
+  const startAzureConnect = () => {
+    if (!oauthProviders.microsoftEntra) {
+      setConnectError("Configure Microsoft Entra OAuth to connect Azure.");
+      return;
+    }
+    setConnectError(null);
+    sessionStorage.setItem(PENDING_PROVIDER_KEY, "azure");
+    void signIn("microsoft-entra-id", { callbackUrl: window.location.href });
+  };
+
+  const startGithubConnect = () => {
+    if (!oauthProviders.github) {
+      setConnectError("Configure GitHub OAuth to connect GitHub.");
+      return;
+    }
+    setConnectError(null);
+    sessionStorage.setItem(PENDING_PROVIDER_KEY, "github");
+    void signIn("github", {
+      callbackUrl: window.location.href,
+      authorizationParams: {
+        scope: "read:user user:email repo read:org",
+      },
+    });
+  };
+
+  const openAwsConsole = () => {
+    window.open(awsIamCreateRoleUrl(awsAccountId), "_blank", "noopener,noreferrer");
+  };
+
+  const submitAwsArn = () => {
+    const arn = awsArn.trim();
+    if (!isValidAwsRoleArn(arn)) {
+      setAwsError("Enter a valid IAM role ARN (arn:aws:iam::123456789012:role/…).");
+      return;
+    }
+    setAwsError(null);
+    setAwsOpen(false);
+    setAwsArn("");
+    void runConnectPipeline("aws", arn);
+  };
+
+  const submitOkta = () => {
+    if (!isValidOktaDomainInput(oktaDomain)) {
+      setOktaError("Enter your Okta domain (e.g. dev-123.okta.com or full URL).");
+      return;
+    }
+    if (!oktaToken.trim()) {
+      setOktaError("Paste a read-only API token.");
+      return;
+    }
+    setOktaError(null);
+    setOktaOpen(false);
+    const detail = oktaDomain.trim();
+    setOktaDomain("");
+    setOktaToken("");
+    void runConnectPipeline("okta", detail);
+  };
+
+  const onConnectClick = (id: CloudProviderKey) => {
+    setConnectError(null);
+    if (id === "aws") {
+      setAwsOpen(true);
+      return;
+    }
+    if (id === "okta") {
+      setOktaOpen(true);
+      return;
+    }
+    if (id === "gcp") {
+      startGcpConnect();
+      return;
+    }
+    if (id === "azure") {
+      startAzureConnect();
+      return;
+    }
+    if (id === "github") {
+      startGithubConnect();
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -95,6 +306,23 @@ export function WorkspaceTab({
             </button>
           )}
         </motion.div>
+      )}
+
+      {connectError && (
+        <div
+          role="alert"
+          className="flex items-start justify-between gap-3 rounded-2xl border border-amber-500/35 bg-amber-500/10 px-4 py-3.5 text-sm text-amber-900 dark:text-amber-100"
+        >
+          <span>{connectError}</span>
+          <button
+            type="button"
+            aria-label="Dismiss"
+            onClick={() => setConnectError(null)}
+            className="shrink-0 rounded-md p-1 hover:bg-amber-500/15"
+          >
+            <FontAwesomeIcon icon={faXmark} className="h-3.5 w-3.5" />
+          </button>
+        </div>
       )}
 
       {/* ── Upload zone ── */}
@@ -178,7 +406,6 @@ export function WorkspaceTab({
           )}
         </div>
 
-        {/* Recent uploads inline */}
         <div className="mt-5">
           <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--fg-muted)]">
             Recently processed
@@ -204,7 +431,7 @@ export function WorkspaceTab({
         </div>
       </div>
 
-      {/* ── Pipeline progress directly under upload ── */}
+      {/* ── Pipeline progress ── */}
       <div className="rounded-2xl border border-[color-mix(in_oklch,var(--border)_42%,transparent)] bg-[color-mix(in_oklch,var(--card)_90%,transparent)] p-6 md:p-7 glow-border">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
           <div>
@@ -284,7 +511,7 @@ export function WorkspaceTab({
 
       {/* ── Integrations ── */}
       <div className="rounded-2xl border border-[color-mix(in_oklch,var(--border)_42%,transparent)] bg-[color-mix(in_oklch,var(--card)_90%,transparent)] p-6 md:p-7 glow-border">
-        <div className="mb-5 flex items-center justify-between">
+        <div className="mb-5 flex items-center justify-between gap-3">
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--fg-muted)]">
               Connected sources
@@ -293,32 +520,60 @@ export function WorkspaceTab({
               Read-only API streams — least-privilege scopes.
             </p>
           </div>
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+          <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.7)]" />
-            3 live
+            {liveCount} live
           </span>
         </div>
 
         <div className="grid gap-2.5 sm:grid-cols-2">
-          {INTEGRATIONS.map((i) => {
-            const isConnected = i.status === "connected";
+          {INTEGRATION_ROWS.map((row) => {
+            const snap = snapshots[row.id];
+            const status = snap?.status ?? row.defaultStatus;
+            const isLive = status === "live";
+            const isConnecting = status === "connecting";
+            const scopeLabel =
+              snap?.meta != null
+                ? `${snap.meta.services} services · ${snap.meta.resources} resources · ${snap.meta.logStreams} log streams`
+                : row.defaultScope;
+
             return (
               <motion.button
-                key={i.name}
+                key={row.id}
                 type="button"
                 whileHover={{ y: -2 }}
-                className="group flex items-center justify-between gap-3 rounded-xl border border-[color-mix(in_oklch,var(--border)_42%,transparent)] bg-[var(--bg)]/45 p-3.5 text-left glow-border-hover"
+                onClick={() => {
+                  if (isLive || isConnecting) return;
+                  onConnectClick(row.id);
+                }}
+                disabled={isLive || isConnecting}
+                className="group flex items-center justify-between gap-3 rounded-xl border border-[color-mix(in_oklch,var(--border)_42%,transparent)] bg-[var(--bg)]/45 p-3.5 text-left glow-border-hover disabled:cursor-default disabled:opacity-95"
               >
                 <div className="flex min-w-0 items-center gap-3">
                   <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[color-mix(in_oklch,var(--card)_90%,transparent)] text-[var(--fg-muted)]">
-                    <FontAwesomeIcon icon={i.icon} className="h-4 w-4" />
+                    <FontAwesomeIcon icon={row.icon} className="h-4 w-4" />
                   </span>
                   <div className="min-w-0">
-                    <p className="text-sm font-semibold">{i.name}</p>
-                    <p className="truncate text-[11px] text-[var(--fg-muted)]">{i.scope}</p>
+                    <p className="text-sm font-semibold">{row.name}</p>
+                    <p className="truncate text-[11px] text-[var(--fg-muted)]">{scopeLabel}</p>
+                    {snap?.detail && isLive && row.id === "aws" && (
+                      <p className="mt-0.5 truncate font-mono text-[10px] text-[var(--fg-muted)]">
+                        {snap.detail}
+                      </p>
+                    )}
                   </div>
                 </div>
-                {isConnected ? (
+                {isConnecting ? (
+                  <span className="inline-flex shrink-0 items-center gap-1.5 text-[11px] font-semibold text-[var(--accent)]">
+                    <motion.span
+                      animate={{ rotate: 360 }}
+                      transition={{ duration: 1.2, repeat: Infinity, ease: "linear" }}
+                    >
+                      <FontAwesomeIcon icon={faArrowsRotate} className="h-3.5 w-3.5" />
+                    </motion.span>
+                    Connecting…
+                  </span>
+                ) : isLive ? (
                   <span className="inline-flex shrink-0 items-center gap-1 text-[11px] font-semibold text-emerald-500">
                     <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.7)]" />
                     Live
@@ -326,7 +581,7 @@ export function WorkspaceTab({
                 ) : (
                   <span className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-[color-mix(in_oklch,var(--border)_55%,transparent)] px-2.5 py-1.5 text-[11px] font-semibold text-[var(--fg-muted)] transition-colors group-hover:border-[color-mix(in_oklch,var(--accent)_45%,transparent)] group-hover:text-[var(--accent)]">
                     <FontAwesomeIcon icon={faPlus} className="h-2.5 w-2.5" />
-                    Connect
+                    Connect {row.name}
                   </span>
                 )}
               </motion.button>
@@ -334,6 +589,157 @@ export function WorkspaceTab({
           })}
         </div>
       </div>
+
+      <AnimatePresence>
+        {awsOpen ? (
+          <motion.div
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <button
+              type="button"
+              aria-label="Close"
+              className="absolute inset-0 bg-[oklch(0_0_0/0.55)] backdrop-blur-sm"
+              onClick={() => setAwsOpen(false)}
+            />
+            <motion.div
+              role="dialog"
+              aria-modal
+              initial={{ opacity: 0, y: 16, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 12, scale: 0.99 }}
+              className="relative w-full max-w-lg rounded-2xl border border-[color-mix(in_oklch,var(--border)_45%,transparent)] bg-[var(--bg-elevated)] p-6 shadow-[0_0_80px_-20px_var(--glow)]"
+            >
+              <button
+                type="button"
+                onClick={() => setAwsOpen(false)}
+                className="absolute right-3 top-3 rounded-lg p-2 text-[var(--fg-muted)] hover:bg-[var(--bg)]/80"
+                aria-label="Close"
+              >
+                <FontAwesomeIcon icon={faXmark} className="h-4 w-4" />
+              </button>
+              <h2 className="pr-8 text-lg font-semibold">Connect AWS</h2>
+              <p className="mt-2 text-sm text-[var(--fg-muted)]">
+                Open IAM to create a read-only trust role
+                {awsAccountId ? ` for account ${awsAccountId}` : ""}, then paste the role ARN.
+              </p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={openAwsConsole}
+                  className="rounded-xl bg-[var(--accent)] px-4 py-2.5 text-sm font-semibold text-[var(--accent-foreground)]"
+                >
+                  Open IAM role wizard
+                </button>
+              </div>
+              <label className="mt-5 block text-xs font-semibold uppercase tracking-wide text-[var(--fg-muted)]">
+                Role ARN
+              </label>
+              <input
+                value={awsArn}
+                onChange={(e) => setAwsArn(e.target.value)}
+                placeholder="arn:aws:iam::123456789012:role/VenyraReadOnly"
+                className="mt-2 w-full rounded-xl border border-[color-mix(in_oklch,var(--border)_50%,transparent)] bg-[var(--bg)]/55 px-3 py-2.5 font-mono text-sm outline-none ring-[var(--accent)] focus:ring-2"
+              />
+              {awsError && <p className="mt-2 text-xs text-rose-500">{awsError}</p>}
+              <div className="mt-5 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setAwsOpen(false)}
+                  className="rounded-xl px-4 py-2.5 text-sm text-[var(--fg-muted)]"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={submitAwsArn}
+                  className="rounded-xl bg-[var(--accent)] px-4 py-2.5 text-sm font-semibold text-[var(--accent-foreground)]"
+                >
+                  Validate &amp; connect
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {oktaOpen ? (
+          <motion.div
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <button
+              type="button"
+              aria-label="Close"
+              className="absolute inset-0 bg-[oklch(0_0_0/0.55)] backdrop-blur-sm"
+              onClick={() => setOktaOpen(false)}
+            />
+            <motion.div
+              role="dialog"
+              aria-modal
+              initial={{ opacity: 0, y: 16, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 12, scale: 0.99 }}
+              className="relative w-full max-w-lg rounded-2xl border border-[color-mix(in_oklch,var(--border)_45%,transparent)] bg-[var(--bg-elevated)] p-6 shadow-[0_0_80px_-20px_var(--glow)]"
+            >
+              <button
+                type="button"
+                onClick={() => setOktaOpen(false)}
+                className="absolute right-3 top-3 rounded-lg p-2 text-[var(--fg-muted)] hover:bg-[var(--bg)]/80"
+                aria-label="Close"
+              >
+                <FontAwesomeIcon icon={faXmark} className="h-4 w-4" />
+              </button>
+              <h2 className="pr-8 text-lg font-semibold">Connect Okta</h2>
+              <p className="mt-2 text-sm text-[var(--fg-muted)]">
+                Enter your Okta org domain and a read-only API token. Tokens are kept in this browser
+                session only for this prototype UI.
+              </p>
+              <label className="mt-4 block text-xs font-semibold uppercase tracking-wide text-[var(--fg-muted)]">
+                Okta domain
+              </label>
+              <input
+                value={oktaDomain}
+                onChange={(e) => setOktaDomain(e.target.value)}
+                placeholder="dev-12345.okta.com"
+                className="mt-2 w-full rounded-xl border border-[color-mix(in_oklch,var(--border)_50%,transparent)] bg-[var(--bg)]/55 px-3 py-2.5 text-sm outline-none ring-[var(--accent)] focus:ring-2"
+              />
+              <label className="mt-4 block text-xs font-semibold uppercase tracking-wide text-[var(--fg-muted)]">
+                API token
+              </label>
+              <input
+                type="password"
+                value={oktaToken}
+                onChange={(e) => setOktaToken(e.target.value)}
+                placeholder="••••••••"
+                className="mt-2 w-full rounded-xl border border-[color-mix(in_oklch,var(--border)_50%,transparent)] bg-[var(--bg)]/55 px-3 py-2.5 text-sm outline-none ring-[var(--accent)] focus:ring-2"
+              />
+              {oktaError && <p className="mt-2 text-xs text-rose-500">{oktaError}</p>}
+              <div className="mt-5 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setOktaOpen(false)}
+                  className="rounded-xl px-4 py-2.5 text-sm text-[var(--fg-muted)]"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={submitOkta}
+                  className="rounded-xl bg-[var(--accent)] px-4 py-2.5 text-sm font-semibold text-[var(--accent-foreground)]"
+                >
+                  Save &amp; connect
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
     </div>
   );
 }

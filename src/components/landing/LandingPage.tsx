@@ -81,8 +81,20 @@ export function LandingPage() {
               ))}
             </nav>
 
-            <div className="flex items-center gap-1.5">
+            <div className="flex flex-wrap items-center justify-end gap-1.5 sm:gap-2">
               <ThemeToggle className="h-9 w-9" />
+              <Link
+                href="/auth/signin"
+                className="rounded-full px-3 py-2 text-xs font-medium text-[var(--fg-muted)] transition-colors hover:text-[var(--fg)]"
+              >
+                Sign in
+              </Link>
+              <Link
+                href="/auth/signup"
+                className="rounded-full border border-[color-mix(in_oklch,var(--border)_55%,transparent)] px-3 py-2 text-xs font-semibold text-[var(--fg)] transition-colors hover:border-[color-mix(in_oklch,var(--accent)_40%,transparent)]"
+              >
+                Sign up
+              </Link>
               <Link
                 href="/home"
                 className="inline-flex items-center gap-1.5 rounded-full bg-[var(--accent)] px-3.5 py-2 text-xs font-semibold text-[var(--accent-foreground)] shadow-[0_0_24px_-6px_var(--glow)] transition-shadow hover:shadow-[0_0_36px_-4px_var(--glow)]"

@@ -2,6 +2,7 @@
 
 import {
   faArrowRight,
+  faArrowRightFromBracket,
   faBoxArchive,
   faChartPie,
   faChevronDown,
@@ -9,6 +10,7 @@ import {
   faCircleUser,
   faDownload,
   faEnvelope,
+  faHouse,
   faLayerGroup,
   faMagnifyingGlass,
   faShieldHalved,
@@ -18,8 +20,11 @@ import {
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useAppAuth } from "@/components/providers/app-auth-provider";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
+import type { OauthProviderFlags } from "@/lib/auth-provider-flags";
 import { api, type OutputLogFile } from "@/lib/api";
 import { OverviewCharts } from "./OverviewCharts";
 import { WorkspaceTab } from "./WorkspaceTab";
@@ -344,9 +349,13 @@ function SectionSkeleton() {
 function Sidebar({
   active,
   onSelect,
+  userLabel,
+  userSub,
 }: {
   active: Section;
   onSelect: (s: Section) => void;
+  userLabel: string;
+  userSub: string;
 }) {
   return (
     <aside className="sticky top-0 hidden h-screen w-[15.5rem] shrink-0 flex-col border-r border-[color-mix(in_oklch,var(--border)_42%,transparent)] bg-[color-mix(in_oklch,var(--card)_55%,var(--bg)_45%)] backdrop-blur-xl md:flex">
@@ -411,19 +420,19 @@ function Sidebar({
       <div className="mt-auto border-t border-[color-mix(in_oklch,var(--border)_40%,transparent)] p-3">
         <div className="flex items-center gap-3 rounded-xl px-3 py-2.5">
           <span className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-[var(--accent)] to-[oklch(0.55_0.18_290)] text-xs font-semibold text-white">
-            J
+            {userLabel.slice(0, 1).toUpperCase() || "?"}
           </span>
           <div className="min-w-0 leading-tight">
-            <p className="truncate text-xs font-semibold">Jordan Lee</p>
-            <p className="truncate text-[10px] text-[var(--fg-muted)]">Security · Acme</p>
+            <p className="truncate text-xs font-semibold">{userLabel}</p>
+            <p className="truncate text-[10px] text-[var(--fg-muted)]">{userSub}</p>
           </div>
         </div>
         <Link
           href="/"
           className="mt-1 flex items-center gap-2 rounded-xl px-3 py-2 text-[11px] font-medium text-[var(--fg-muted)] transition-colors hover:bg-[color-mix(in_oklch,var(--card)_80%,transparent)] hover:text-[var(--fg)]"
         >
-          <FontAwesomeIcon icon={faChevronRight} className="h-2.5 w-2.5 rotate-180" />
-          Back to marketing site
+          <FontAwesomeIcon icon={faHouse} className="h-3 w-3 opacity-80" />
+          Home · marketing site
         </Link>
       </div>
     </aside>
@@ -456,7 +465,9 @@ function MobileNav({ active, onSelect }: { active: Section; onSelect: (s: Sectio
   );
 }
 
-export function HomeDashboard() {
+export function HomeDashboard({ oauthProviders }: { oauthProviders: OauthProviderFlags }) {
+  const router = useRouter();
+  const { user, signOutAll } = useAppAuth();
   const [section, setSection] = useState<Section>("overview");
   const [email, setEmail] = useState("");
   const [uploadBusy, setUploadBusy] = useState(false);
@@ -633,6 +644,8 @@ export function HomeDashboard() {
               uploadError={uploadError}
               dismissError={() => setUploadError(null)}
               pipelineStage={pipelineStage}
+              oauthProviders={oauthProviders}
+              awsAccountId={process.env.NEXT_PUBLIC_AWS_ACCOUNT_ID}
             />
         );
         break;
@@ -659,9 +672,26 @@ export function HomeDashboard() {
     }
   }
 
+  const displayName = user?.name || user?.email || "Guest";
+  const displaySub = user
+    ? user.source === "nextauth"
+      ? "Signed in · OAuth or portal"
+      : "Signed in · Supabase"
+    : "Not signed in · local session";
+
+  const onLogout = async () => {
+    await signOutAll();
+    router.refresh();
+  };
+
   return (
     <div className="flex min-h-screen bg-[var(--bg)] text-[var(--fg)] md:flex-row">
-      <Sidebar active={section} onSelect={onSelectSection} />
+      <Sidebar
+        active={section}
+        onSelect={onSelectSection}
+        userLabel={displayName}
+        userSub={displaySub}
+      />
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center justify-between gap-4 border-b border-[color-mix(in_oklch,var(--border)_38%,transparent)] bg-[color-mix(in_oklch,var(--bg)_82%,transparent)] px-4 backdrop-blur-xl md:h-[3.75rem] md:px-8">
@@ -675,6 +705,13 @@ export function HomeDashboard() {
             </span>
           </div>
           <div className="flex items-center gap-2">
+            <Link
+              href="/"
+              className="hidden items-center gap-1.5 rounded-xl border border-[color-mix(in_oklch,var(--border)_45%,transparent)] bg-[var(--card)] px-3 py-2 text-xs font-medium text-[var(--fg-muted)] transition-colors hover:text-[var(--fg)] sm:inline-flex"
+            >
+              <FontAwesomeIcon icon={faHouse} className="h-3 w-3" />
+              Home
+            </Link>
             <div className="hidden items-center gap-2 rounded-xl border border-[color-mix(in_oklch,var(--border)_45%,transparent)] bg-[color-mix(in_oklch,var(--card)_70%,transparent)] px-2.5 py-1.5 text-xs text-[var(--fg-muted)] md:flex">
               <FontAwesomeIcon icon={faMagnifyingGlass} className="h-3 w-3" />
               <input
@@ -688,11 +725,20 @@ export function HomeDashboard() {
             <ThemeToggle />
             <button
               type="button"
-              className="hidden h-10 w-10 items-center justify-center rounded-xl border border-[color-mix(in_oklch,var(--border)_45%,transparent)] bg-[var(--card)] text-[var(--fg-muted)] sm:flex"
-              aria-label="Profile"
+              onClick={() => void onLogout()}
+              className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-[color-mix(in_oklch,var(--border)_45%,transparent)] bg-[var(--card)] px-3 text-xs font-medium text-[var(--fg-muted)] transition-colors hover:text-[var(--fg)]"
+              aria-label="Sign out"
             >
-              <FontAwesomeIcon icon={faCircleUser} className="h-4 w-4 opacity-80" />
+              <FontAwesomeIcon icon={faArrowRightFromBracket} className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Log out</span>
             </button>
+            <span
+              className="hidden h-10 max-w-[10rem] items-center gap-2 truncate rounded-xl border border-[color-mix(in_oklch,var(--border)_45%,transparent)] bg-[var(--card)] px-3 text-xs font-medium text-[var(--fg)] sm:inline-flex"
+              title={user?.email ?? undefined}
+            >
+              <FontAwesomeIcon icon={faCircleUser} className="h-3.5 w-3.5 shrink-0 text-[var(--fg-muted)]" />
+              <span className="truncate">{displayName}</span>
+            </span>
           </div>
         </header>
 
