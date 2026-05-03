@@ -5,7 +5,6 @@ import {
   faArrowRightFromBracket,
   faBoxArchive,
   faChartPie,
-  faChevronDown,
   faChevronRight,
   faCircleUser,
   faDownload,
@@ -21,25 +20,22 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useAppAuth } from "@/components/providers/app-auth-provider";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import type { OauthProviderFlags } from "@/lib/auth-provider-flags";
 import { api, type OutputLogFile, type StorageAuthHeaders } from "@/lib/api";
+import type { ComplianceFramework } from "@/lib/compliance-framework";
+import {
+  COMPLIANCE_FRAMEWORK_LABEL,
+  COMPLIANCE_FRAMEWORK_SUB,
+} from "@/lib/compliance-framework";
 import { OverviewCharts } from "./OverviewCharts";
 import { WorkspaceTab } from "./WorkspaceTab";
 
 type Section = "overview" | "workspace" | "output";
 
-const AI_LINES = [
-  "Scanning the document for evidence…",
-  "OCR agents extracting dense tables…",
-  "LLM agents mapping controls…",
-  "Generating the audit report…",
-  "Packaging auditor-ready output…",
-];
-
-const STAGE_LINES: Record<string, string> = {
+const STAGE_LINES_SOC2: Record<string, string> = {
   queued: "Queued for secure processing…",
   scanning: "Scanning the document for evidence…",
   ocr: "OCR agents extracting dense tables…",
@@ -50,6 +46,29 @@ const STAGE_LINES: Record<string, string> = {
   complete: "Audit package delivered.",
   error: "Pipeline error detected. Retrying…",
 };
+
+const STAGE_LINES_DPDP: Record<string, string> = {
+  ...STAGE_LINES_SOC2,
+  llm: "LLM agents mapping DPDP obligations…",
+  report: "Generating the DPDP gap analysis report…",
+  complete: "DPDP analysis package delivered.",
+};
+
+const AI_LINES_SOC2 = [
+  "Scanning the document for evidence…",
+  "OCR agents extracting dense tables…",
+  "LLM agents mapping controls…",
+  "Generating the audit report…",
+  "Packaging auditor-ready output…",
+];
+
+const AI_LINES_DPDP = [
+  "Scanning the document for evidence…",
+  "OCR agents extracting dense tables…",
+  "LLM agents mapping DPDP themes…",
+  "Generating the DPDP gap report…",
+  "Packaging India DPDP-ready output…",
+];
 
 const STAGE_TO_STEP: Record<string, number> = {
   queued: 0,
@@ -64,6 +83,44 @@ const STAGE_TO_STEP: Record<string, number> = {
 };
 
 const STATUS_STALE_MS = 10 * 60 * 1000;
+
+const FRAMEWORK_STORAGE_KEY = "venyra-compliance-framework";
+
+function ComplianceFrameworkControl({
+  value,
+  onChange,
+  className = "",
+}: {
+  value: ComplianceFramework;
+  onChange: (v: ComplianceFramework) => void;
+  className?: string;
+}) {
+  return (
+    <div
+      className={`flex rounded-full border border-[color-mix(in_oklch,var(--border)_50%,transparent)] bg-[color-mix(in_oklch,var(--bg)_55%,transparent)] p-0.5 ${className}`}
+      role="group"
+      aria-label="Compliance program"
+    >
+      {(["soc2", "dpdp"] as const).map((fw) => {
+        const active = value === fw;
+        return (
+          <button
+            key={fw}
+            type="button"
+            onClick={() => onChange(fw)}
+            className={`rounded-full px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-wide transition-colors sm:px-3 ${
+              active
+                ? "bg-[var(--accent)] text-[var(--accent-foreground)] shadow-[0_0_16px_-6px_var(--glow)]"
+                : "text-[var(--fg-muted)] hover:text-[var(--fg)]"
+            }`}
+          >
+            {fw === "soc2" ? "SOC 2" : "India DPDP"}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 const formatBytes = (bytes?: number | null) => {
   if (!bytes || Number.isNaN(bytes)) return "Unknown size";
@@ -92,12 +149,15 @@ function OutputVault({
   onViewAll,
   files = [],
   isGuestSession = false,
+  framework = "soc2",
 }: {
   dense?: boolean;
   onViewAll?: () => void;
   files?: OutputLogFile[];
   isGuestSession?: boolean;
+  framework?: ComplianceFramework;
 }) {
+  const fwShort = COMPLIANCE_FRAMEWORK_LABEL[framework];
   const visibleFiles = files.length ? files.slice(0, dense ? 3 : files.length) : [];
   const latestUrl = files[0]?.url ?? null;
   const handleDownload = () => {
@@ -115,9 +175,13 @@ function OutputVault({
             <FontAwesomeIcon icon={faBoxArchive} className="h-5 w-5" />
           </span>
           <div>
-            <h3 className="text-base font-semibold tracking-tight">Audited outputs</h3>
+            <h3 className="text-base font-semibold tracking-tight">
+              {framework === "dpdp" ? "DPDP analysis outputs" : "Audited outputs"}
+            </h3>
             <p className="mt-1 text-sm text-[var(--fg-muted)]">
-              Previously audited reports, dated and exportable.
+              {framework === "dpdp"
+                ? `${fwShort} gap reports from this workspace — dated and exportable.`
+                : "Previously audited reports, dated and exportable."}
             </p>
           </div>
         </div>
@@ -157,7 +221,9 @@ function OutputVault({
           <li className="rounded-xl border border-[color-mix(in_oklch,var(--border)_38%,transparent)] bg-[var(--bg)]/40 px-4 py-4 text-sm text-[var(--fg-muted)]">
             {isGuestSession
               ? "No reports in this guest session yet. After a full refresh, this list resets. Sign in to keep your outputs across visits."
-              : "No audited outputs yet. Upload a document to generate your first report."}
+              : framework === "dpdp"
+                ? "No DPDP reports yet for this program. Upload a privacy policy, RoPA, or notice PDF to generate your first analysis."
+                : "No audited outputs yet. Upload a document to generate your first report."}
           </li>
         )}
       </ul>
@@ -183,7 +249,7 @@ function OutputVault({
           aria-disabled={!latestUrl}
         >
           <FontAwesomeIcon icon={faDownload} className="h-4 w-4 opacity-90" />
-          Download auditor-ready package
+          {framework === "dpdp" ? "Download DPDP gap package" : "Download auditor-ready package"}
         </motion.button>
       )}
     </div>
@@ -290,6 +356,9 @@ function WaitlistModal({ open, onClose }: { open: boolean; onClose: () => void }
             <p className="mt-3 text-sm leading-relaxed text-[var(--fg-muted)]">
               Get early access to our HIPAA compliance engine—the same execution quality, tuned for regulated health data.
             </p>
+            <p className="mt-2 text-[11px] leading-relaxed text-[var(--fg-muted)]">
+              We&apos;ll reach out manually. Your email is saved to our database for follow-up.
+            </p>
             <div className="mt-6">
               <label className="sr-only" htmlFor="waitlist-email">
                 Work email
@@ -355,11 +424,15 @@ function Sidebar({
   onSelect,
   userLabel,
   userSub,
+  complianceFramework,
+  onComplianceFrameworkChange,
 }: {
   active: Section;
   onSelect: (s: Section) => void;
   userLabel: string;
   userSub: string;
+  complianceFramework: ComplianceFramework;
+  onComplianceFrameworkChange: (v: ComplianceFramework) => void;
 }) {
   return (
     <aside className="sticky top-0 hidden h-screen w-[15.5rem] shrink-0 flex-col border-r border-[color-mix(in_oklch,var(--border)_42%,transparent)] bg-[color-mix(in_oklch,var(--card)_55%,var(--bg)_45%)] backdrop-blur-xl md:flex">
@@ -373,22 +446,25 @@ function Sidebar({
         </div>
       </div>
 
-      {/* Workspace switcher */}
-      <button
-        type="button"
-        className="mx-3 mb-3 flex items-center justify-between rounded-xl border border-[color-mix(in_oklch,var(--border)_45%,transparent)] bg-[color-mix(in_oklch,var(--bg)_60%,transparent)] px-3 py-2 text-left text-xs transition-colors hover:border-[color-mix(in_oklch,var(--accent)_35%,transparent)]"
-      >
-        <span className="flex min-w-0 items-center gap-2">
+      {/* Program + tenant */}
+      <div className="mx-3 mb-3 space-y-2 rounded-xl border border-[color-mix(in_oklch,var(--border)_45%,transparent)] bg-[color-mix(in_oklch,var(--bg)_60%,transparent)] px-3 py-2.5 text-left text-xs">
+        <div className="flex items-center gap-2">
           <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-[var(--accent)] to-[oklch(0.55_0.18_290)] text-[10px] font-bold text-white">
             A
           </span>
           <span className="min-w-0">
             <span className="block truncate font-semibold text-[var(--fg)]">Acme Corp</span>
-            <span className="block text-[10px] text-[var(--fg-muted)]">SOC 2 Type II</span>
+            <span className="block text-[10px] text-[var(--fg-muted)]">
+              {COMPLIANCE_FRAMEWORK_SUB[complianceFramework]}
+            </span>
           </span>
-        </span>
-        <FontAwesomeIcon icon={faChevronDown} className="h-2.5 w-2.5 text-[var(--fg-muted)]" />
-      </button>
+        </div>
+        <ComplianceFrameworkControl
+          value={complianceFramework}
+          onChange={onComplianceFrameworkChange}
+          className="w-full justify-stretch [&>button]:flex-1"
+        />
+      </div>
 
       <nav className="flex flex-col gap-0.5 px-3 py-2" aria-label="Workspace">
         {NAV.map((item) => {
@@ -516,7 +592,45 @@ export function HomeDashboard({ oauthProviders }: { oauthProviders: OauthProvide
   const [aiLineIdx, setAiLineIdx] = useState(0);
   const [loadingSection, setLoadingSection] = useState(false);
 
-  const aiLine = STAGE_LINES[pipelineStage] ?? AI_LINES[aiLineIdx % AI_LINES.length];
+  const [complianceFramework, setComplianceFramework] =
+    useState<ComplianceFramework>("soc2");
+
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(FRAMEWORK_STORAGE_KEY);
+      if (raw === "dpdp" || raw === "soc2") setComplianceFramework(raw);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(FRAMEWORK_STORAGE_KEY, complianceFramework);
+    } catch {
+      /* ignore */
+    }
+  }, [complianceFramework]);
+
+  useEffect(() => {
+    setJobId(null);
+    setPipelineActive(false);
+    setPipelineStage("queued");
+    setProgress(0);
+    setActiveStep(0);
+    setUploadError(null);
+  }, [complianceFramework]);
+
+  const stageLines = useMemo(
+    () => (complianceFramework === "dpdp" ? STAGE_LINES_DPDP : STAGE_LINES_SOC2),
+    [complianceFramework],
+  );
+  const aiLinePool = useMemo(
+    () => (complianceFramework === "dpdp" ? AI_LINES_DPDP : AI_LINES_SOC2),
+    [complianceFramework],
+  );
+
+  const aiLine = stageLines[pipelineStage] ?? aiLinePool[aiLineIdx % aiLinePool.length];
 
   useEffect(() => {
     const t = setInterval(() => setAiLineIdx((i) => i + 1), 4200);
@@ -525,17 +639,21 @@ export function HomeDashboard({ oauthProviders }: { oauthProviders: OauthProvide
 
   const fetchOutputLogs = useCallback(async () => {
     const storageAuth = await buildStorageAuthHeaders();
-    const { data, error } = await api.getOutputLogs(storageAuth);
+    const { data, error } = await api.getOutputLogs(storageAuth, complianceFramework);
     if (error || !data) return;
     setOutputFiles(data.files);
-  }, [buildStorageAuthHeaders]);
+  }, [buildStorageAuthHeaders, complianceFramework]);
 
   useEffect(() => {
     if (authLoading) return;
     let cancelled = false;
     (async () => {
       const storageAuth = await buildStorageAuthHeaders();
-      const { data, error } = await api.getComplianceStatus(undefined, storageAuth);
+      const { data, error } = await api.getComplianceStatus(
+        undefined,
+        storageAuth,
+        complianceFramework,
+      );
       if (cancelled || error || !data) return;
       const updatedAt = data.updatedAt ? Date.parse(data.updatedAt) : 0;
       const isStale = !updatedAt || Date.now() - updatedAt > STATUS_STALE_MS;
@@ -560,7 +678,7 @@ export function HomeDashboard({ oauthProviders }: { oauthProviders: OauthProvide
     return () => {
       cancelled = true;
     };
-  }, [authLoading, buildStorageAuthHeaders]);
+  }, [authLoading, buildStorageAuthHeaders, complianceFramework]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -577,7 +695,11 @@ export function HomeDashboard({ oauthProviders }: { oauthProviders: OauthProvide
 
     const poll = async () => {
       const storageAuth = await buildStorageAuthHeaders();
-      const { data, error } = await api.getComplianceStatus(jobId, storageAuth);
+      const { data, error } = await api.getComplianceStatus(
+        jobId,
+        storageAuth,
+        complianceFramework,
+      );
       if (cancelled || error || !data) return;
       const updatedAt = data.updatedAt ? Date.parse(data.updatedAt) : 0;
       const isStale = !updatedAt || Date.now() - updatedAt > STATUS_STALE_MS;
@@ -606,7 +728,7 @@ export function HomeDashboard({ oauthProviders }: { oauthProviders: OauthProvide
       cancelled = true;
       clearInterval(timer);
     };
-  }, [authLoading, buildStorageAuthHeaders, fetchOutputLogs, jobId]);
+  }, [authLoading, buildStorageAuthHeaders, complianceFramework, fetchOutputLogs, jobId]);
 
   const handleFiles = useCallback(
     async (files: FileList | null) => {
@@ -641,6 +763,7 @@ export function HomeDashboard({ oauthProviders }: { oauthProviders: OauthProvide
           const fd = new FormData();
           fd.set("file", file);
           fd.set("email", email.trim());
+          fd.set("framework", complianceFramework);
           const { data, error } = await api.uploadFiles(fd, storageAuth);
           if (error || !data?.ok) {
             const message = error ?? data?.error ?? "Upload failed.";
@@ -661,7 +784,7 @@ export function HomeDashboard({ oauthProviders }: { oauthProviders: OauthProvide
         setUploadBusy(false);
       }
     },
-    [authLoading, buildStorageAuthHeaders, email, user],
+    [authLoading, buildStorageAuthHeaders, complianceFramework, email, user],
   );
 
   const onSelectSection = (s: Section) => {
@@ -691,13 +814,18 @@ export function HomeDashboard({ oauthProviders }: { oauthProviders: OauthProvide
               oauthProviders={oauthProviders}
               awsAccountId={process.env.NEXT_PUBLIC_AWS_ACCOUNT_ID}
               isGuestSession={!user && !authLoading}
+              framework={complianceFramework}
             />
         );
         break;
       case "output":
         mainContent = (
           <div className="space-y-6">
-            <OutputVault files={outputFiles} isGuestSession={!user && !authLoading} />
+            <OutputVault
+              files={outputFiles}
+              isGuestSession={!user && !authLoading}
+              framework={complianceFramework}
+            />
             <HipaaBanner onOpen={() => setWaitlistOpen(true)} />
           </div>
         );
@@ -705,12 +833,13 @@ export function HomeDashboard({ oauthProviders }: { oauthProviders: OauthProvide
       default:
         mainContent = (
           <div className="space-y-6">
-            <OverviewCharts readiness={progress} />
+            <OverviewCharts readiness={progress} framework={complianceFramework} />
             <OutputVault
               dense
               files={outputFiles}
               onViewAll={() => onSelectSection("output")}
               isGuestSession={!user && !authLoading}
+              framework={complianceFramework}
             />
             <HipaaBanner onOpen={() => setWaitlistOpen(true)} />
           </div>
@@ -740,6 +869,8 @@ export function HomeDashboard({ oauthProviders }: { oauthProviders: OauthProvide
         onSelect={onSelectSection}
         userLabel={displayName}
         userSub={displaySub}
+        complianceFramework={complianceFramework}
+        onComplianceFrameworkChange={setComplianceFramework}
       />
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -754,6 +885,11 @@ export function HomeDashboard({ oauthProviders }: { oauthProviders: OauthProvide
             </span>
           </div>
           <div className="flex items-center gap-2">
+            <ComplianceFrameworkControl
+              value={complianceFramework}
+              onChange={setComplianceFramework}
+              className="shrink-0 md:hidden"
+            />
             <Link
               href="/"
               className="hidden items-center gap-1.5 rounded-xl border border-[color-mix(in_oklch,var(--border)_45%,transparent)] bg-[var(--card)] px-3 py-2 text-xs font-medium text-[var(--fg-muted)] transition-colors hover:text-[var(--fg)] sm:inline-flex"
@@ -809,16 +945,38 @@ export function HomeDashboard({ oauthProviders }: { oauthProviders: OauthProvide
               <div className="min-w-0">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--fg-muted)]">
                   {NAV.find((n) => n.id === section)?.label}
+                  <span className="text-[var(--fg-muted)]/80">
+                    {" · "}
+                    {COMPLIANCE_FRAMEWORK_LABEL[complianceFramework]}
+                  </span>
                 </p>
                 <h1 className="mt-1.5 text-2xl font-semibold tracking-tight md:text-[1.7rem]">
-                  {section === "overview" && "SOC 2 readiness at a glance"}
-                  {section === "workspace" && "Your compliance workspace"}
-                  {section === "output" && "Output room"}
+                  {section === "overview" &&
+                    (complianceFramework === "dpdp"
+                      ? "India DPDP readiness at a glance"
+                      : "SOC 2 readiness at a glance")}
+                  {section === "workspace" &&
+                    (complianceFramework === "dpdp"
+                      ? "DPDP analysis workspace"
+                      : "Your compliance workspace")}
+                  {section === "output" &&
+                    (complianceFramework === "dpdp"
+                      ? "DPDP output room"
+                      : "Output room")}
                 </h1>
                 <p className="mt-1.5 max-w-xl text-sm leading-relaxed text-[var(--fg-muted)]">
-                  {section === "overview" && "Live readiness, control coverage, and what to do next."}
-                  {section === "workspace" && "Upload documents, connect sources, watch the pipeline run."}
-                  {section === "output" && "Auditor-ready artifacts, dated and exportable."}
+                  {section === "overview" &&
+                    (complianceFramework === "dpdp"
+                      ? "Privacy program readiness, DPDP themes, and evidence — same live execution model as SOC 2."
+                      : "Live readiness, control coverage, and what to do next.")}
+                  {section === "workspace" &&
+                    (complianceFramework === "dpdp"
+                      ? "Upload privacy notices, RoPA, or policies — OCR + Gemini produce a DPDP gap report in the segregated output folder."
+                      : "Upload documents, connect sources, watch the pipeline run.")}
+                  {section === "output" &&
+                    (complianceFramework === "dpdp"
+                      ? `${COMPLIANCE_FRAMEWORK_LABEL.dpdp} gap reports only — separate from SOC 2 exports.`
+                      : "Auditor-ready artifacts, dated and exportable.")}
                 </p>
               </div>
               {section === "overview" && (

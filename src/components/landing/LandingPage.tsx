@@ -43,6 +43,16 @@ const COMPARE_ROWS = [
   { label: "Control mapping", manual: "Spreadsheets", venyra: "AI, continuous" },
   { label: "Policy drafting", manual: "Templates + edits", venyra: "Generated, branded, versioned" },
   { label: "Audit readiness signal", manual: "Best guess", venyra: "Live % complete" },
+  {
+    label: "India DPDP (2023 Act)",
+    manual: "Ad-hoc legal reviews",
+    venyra: "Dedicated DPDP workspace · segregated outputs",
+  },
+  {
+    label: "Cross-border & consent posture",
+    manual: "Static policies",
+    venyra: "LLM gap reports mapped to DPDP themes",
+  },
 ];
 
 export function LandingPage() {
@@ -139,7 +149,7 @@ export function LandingPage() {
             className="mb-7 inline-flex items-center gap-2 rounded-full glass-pill px-3.5 py-1.5 text-[10.5px] font-semibold uppercase tracking-[0.22em] text-[var(--fg-muted)]"
           >
             <span className="flex h-1.5 w-1.5 rounded-full bg-[var(--accent)] shadow-[0_0_10px_var(--glow)]" />
-            SOC 2 Type I &amp; II
+            SOC 2 · India DPDP
           </motion.div>
 
           <motion.h1
@@ -149,10 +159,10 @@ export function LandingPage() {
             variants={fadeUp}
             className="text-balance text-[2.5rem] font-semibold leading-[1.02] tracking-tight sm:text-[3.5rem] md:text-[4.5rem] lg:text-[5rem]"
           >
-            SOC 2 compliance,
+            Compliance that scales,
             <br />
-            <span className="italic font-normal text-[var(--fg)]">handled</span>{" "}
-            end&nbsp;to&nbsp;end.
+            <span className="italic font-normal text-[var(--fg)]">from SOC 2 to DPDP</span>
+            .
           </motion.h1>
 
           <motion.p
@@ -162,8 +172,8 @@ export function LandingPage() {
             variants={fadeUp}
             className="mt-6 max-w-xl text-base leading-relaxed text-[var(--fg-muted)] md:text-lg"
           >
-            Upload your docs. Our AI maps controls, gathers evidence, and ships an
-            auditor-ready package—in days, not months.
+            Upload your docs. Our AI maps TSC controls for SOC 2 and DPDP obligations for India—separate
+            workspaces, same OCR pipeline, auditor- and counsel-ready packages in days.
           </motion.p>
 
           <motion.div

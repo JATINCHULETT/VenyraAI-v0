@@ -6,8 +6,10 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { marked } from "marked";
 import pdfParse from "pdf-parse";
 import puppeteer from "puppeteer";
-import { Resend } from "resend";
-
+import {
+  type ComplianceFramework,
+  frameworkStorageSegment,
+} from "@/lib/compliance-framework";
 import { getSupabaseServerClient } from "@/lib/supabase";
 import { ensureBucketExists } from "@/lib/supabase-buckets";
 import { type PipelineStage, writePipelineStatus } from "@/lib/pipeline-status";
@@ -15,6 +17,49 @@ import { type PipelineStage, writePipelineStatus } from "@/lib/pipeline-status";
 const RAW_BUCKET = "compliance-raw-docs";
 const FINAL_BUCKET = "compliance-final-reports";
 const REPORT_LINK_EXPIRY_SECONDS = 60 * 60 * 24;
+
+const GEMINI_GENERATE_ATTEMPTS = 3;
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Node/fetch connectivity to generativelanguage.googleapis.com (VPN, firewall, IPv6, flaky Wi‑Fi). */
+function isTransientGeminiError(e: unknown): boolean {
+  const msg = e instanceof Error ? e.message : String(e);
+  return /fetch failed|ECONNRESET|ETIMEDOUT|ENOTFOUND|ECONNREFUSED|socket|network|UND_ERR_/i.test(
+    msg,
+  );
+}
+
+function parseGeminiTimeoutMs(): number {
+  const raw = process.env.GEMINI_REQUEST_TIMEOUT_MS?.trim();
+  if (raw && /^\d+$/.test(raw)) {
+    return Math.min(Math.max(parseInt(raw, 10), 30_000), 600_000);
+  }
+  return 180_000;
+}
+
+function augmentGeminiNetworkError(message: string): string {
+  if (!/fetch failed|ECONNRESET|ETIMEDOUT|ENOTFOUND/i.test(message)) return message;
+  return `${message} — Check outbound HTTPS to generativelanguage.googleapis.com (firewall, corporate proxy, VPN), verify GEMINI_API_KEY, and on Windows try: set NODE_OPTIONS=--dns-result-order=ipv4first. Optional: GEMINI_REQUEST_TIMEOUT_MS (ms, default 180000).`;
+}
+
+type GeminiModel = ReturnType<GoogleGenerativeAI["getGenerativeModel"]>;
+
+async function geminiGenerateContentWithRetries(model: GeminiModel, text: string) {
+  let last: unknown;
+  for (let attempt = 0; attempt < GEMINI_GENERATE_ATTEMPTS; attempt++) {
+    try {
+      return await model.generateContent(text);
+    } catch (e) {
+      last = e;
+      if (attempt === GEMINI_GENERATE_ATTEMPTS - 1 || !isTransientGeminiError(e)) {
+        throw e;
+      }
+      await sleep(600 * (attempt + 1));
+    }
+  }
+  throw last;
+}
 const MARKDOWN_BASE_CSS = `
   :root {
     color-scheme: light;
@@ -145,6 +190,7 @@ type RunAuditParams = {
   userEmail: string;
   jobId?: string;
   ownerKey: string;
+  framework: ComplianceFramework;
 };
 
 type RunAuditResult = {
@@ -154,11 +200,34 @@ type RunAuditResult = {
   error?: string;
 };
 
+function systemPromptForFramework(framework: ComplianceFramework): string {
+  if (framework === "dpdp") {
+    return [
+      "You are a senior privacy and data protection advisor focused on India's Digital Personal Data Protection Act, 2023 (DPDP).",
+      "Assume the uploaded text may be policies, RoPA excerpts, DPIA drafts, vendor agreements, or notices.",
+      "Return a clean, well-formatted Markdown report with these sections:",
+      "1) Executive Summary (DPDP posture in plain language)",
+      "2) Critical Gaps (mapped to DPDP themes: lawful processing, notice, consent, purpose limitation, data retention, security safeguards, data principal rights, children's data, cross-border transfers, Significant Data Fiduciary duties where relevant, grievance redressal)",
+      "3) Remediation Plan (prioritized, actionable)",
+      "Be concise, factual, and do not include any preamble or extra sections.",
+    ].join(" ");
+  }
+  return [
+    "You are a strict SOC 2 auditor.",
+    "Return a clean, well-formatted Markdown report with these sections:",
+    "1) Executive Summary",
+    "2) Critical Gaps",
+    "3) Remediation Plan",
+    "Be concise, factual, and do not include any preamble or extra sections.",
+  ].join(" ");
+}
+
 export async function runAuditPipeline({
   filePath,
   userEmail,
   jobId,
   ownerKey,
+  framework,
 }: RunAuditParams): Promise<RunAuditResult> {
   const resolvedJobId = jobId ?? randomUUID();
   const baseStatus = {
@@ -166,6 +235,7 @@ export async function runAuditPipeline({
     ownerKey,
     filePath,
     email: userEmail,
+    framework,
   };
 
   const updateStatus = async (
@@ -189,8 +259,15 @@ export async function runAuditPipeline({
   try {
     await updateStatus("scanning", 12);
     const supabase = getSupabaseServerClient();
-    await ensureBucketExists(RAW_BUCKET);
-    await ensureBucketExists(FINAL_BUCKET);
+    try {
+      await ensureBucketExists(RAW_BUCKET);
+      await ensureBucketExists(FINAL_BUCKET);
+    } catch (e) {
+      console.warn(
+        "Pipeline: ensureBucketExists(raw/final) failed — continuing if buckets already exist",
+        e,
+      );
+    }
 
     const { data, error } = await supabase.storage
       .from(RAW_BUCKET)
@@ -211,28 +288,25 @@ export async function runAuditPipeline({
     }
 
     await updateStatus("llm", 58);
-    const geminiApiKey = process.env.GEMINI_API_KEY;
+    const geminiApiKey = process.env.GEMINI_API_KEY?.trim();
     if (!geminiApiKey) {
       throw new Error("Missing GEMINI_API_KEY.");
     }
 
-    const systemPrompt = [
-      "You are a strict SOC 2 auditor.",
-      "Return a clean, well-formatted Markdown report with these sections:",
-      "1) Executive Summary",
-      "2) Critical Gaps",
-      "3) Remediation Plan",
-      "Be concise, factual, and do not include any preamble or extra sections.",
-    ].join(" ");
+    const systemPrompt = systemPromptForFramework(framework);
 
     const genAI = new GoogleGenerativeAI(geminiApiKey);
-    const geminiModel = process.env.GEMINI_MODEL || "gemini-2.5-flash";
-    const model = genAI.getGenerativeModel({
-      model: geminiModel,
-      systemInstruction: systemPrompt,
-    });
+    const geminiModel = (process.env.GEMINI_MODEL || "gemini-2.5-flash").trim();
+    const requestOptions = { timeout: parseGeminiTimeoutMs() };
+    const model = genAI.getGenerativeModel(
+      {
+        model: geminiModel,
+        systemInstruction: systemPrompt,
+      },
+      requestOptions,
+    );
 
-    const result = await model.generateContent(extractedText);
+    const result = await geminiGenerateContentWithRetries(model, extractedText);
     const content = result.response.text().trim();
     if (!content) {
       throw new Error("LLM returned empty content.");
@@ -244,7 +318,8 @@ export async function runAuditPipeline({
     await updateStatus("upload", 88);
     const baseName = path.posix.parse(filePath).name || "report";
     const timestamp = Date.now();
-    const reportFilePath = `reports/${ownerKey}/${baseName}-${timestamp}.pdf`;
+    const seg = frameworkStorageSegment(framework);
+    const reportFilePath = `reports/${ownerKey}/${seg}/${baseName}-${timestamp}.pdf`;
 
     const { error: uploadError } = await supabase.storage
       .from(FINAL_BUCKET)
@@ -268,43 +343,14 @@ export async function runAuditPipeline({
     const reportUrl = signed.signedUrl;
 
     await updateStatus("email", 94, { reportFilePath, reportUrl });
-    const resendApiKey = process.env.RESEND_API_KEY;
-    const resendFromEmail = process.env.RESEND_FROM_EMAIL;
-
-    // Email delivery is best-effort. If Resend isn't configured (or the
-    // request fails), the report is still considered ready — the user can
-    // download it from the output room. This keeps "document processed"
-    // decoupled from the optional notification step.
-    if (resendApiKey && resendFromEmail) {
-      try {
-        const resend = new Resend(resendApiKey);
-        await resend.emails.send({
-          from: resendFromEmail,
-          to: userEmail,
-          subject: "Your SOC 2 Gap Analysis Report",
-          html: `
-            <p>Your SOC 2 gap analysis report is ready.</p>
-            <p><a href="${reportUrl}">Download the report</a></p>
-          `,
-        });
-      } catch (emailError) {
-        console.warn(
-          "Email delivery skipped — report is still available in the output room.",
-          emailError,
-        );
-      }
-    } else {
-      console.info(
-        "RESEND_API_KEY / RESEND_FROM_EMAIL not configured — skipping email delivery.",
-      );
-    }
 
     await updateStatus("complete", 100, { reportFilePath, reportUrl });
 
     return { ok: true, reportFilePath, reportUrl };
   } catch (error) {
     console.error("Audit pipeline failed", error);
-    const message = error instanceof Error ? error.message : "Unknown error";
+    let message = error instanceof Error ? error.message : "Unknown error";
+    message = augmentGeminiNetworkError(message);
     await updateStatus("error", 100, { error: message });
     return { ok: false, error: message };
   }

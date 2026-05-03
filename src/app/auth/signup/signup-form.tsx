@@ -58,6 +58,11 @@ export function AuthSignUpForm({
         setError(err.message);
         return;
       }
+      void fetch("/api/contact-leads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim(), source: "auth_signup" }),
+      });
       setMessage("Check your email to confirm, or sign in if confirmation is disabled.");
       router.refresh();
     } catch (e) {

@@ -2,6 +2,8 @@
  * Frontend API layer — call existing backend routes without modifying server logic.
  */
 
+import type { ComplianceFramework } from "@/lib/compliance-framework";
+
 const base = () =>
   typeof window !== "undefined" ? "" : process.env.NEXT_PUBLIC_APP_URL ?? "";
 
@@ -60,6 +62,7 @@ export type UploadResponse = {
 export type ComplianceStatusResponse = {
   progress: number;
   stage: string;
+  framework?: ComplianceFramework;
   updatedAt?: string;
   reportFilePath?: string;
   reportUrl?: string;
@@ -92,14 +95,26 @@ export const api = {
       storageAuth,
     }),
 
-  getComplianceStatus: (jobId?: string, storageAuth?: StorageAuthHeaders) =>
-    request<ComplianceStatusResponse>(
-      jobId ? `/api/compliance/status?jobId=${encodeURIComponent(jobId)}` : "/api/compliance/status",
-      { storageAuth },
-    ),
+  getComplianceStatus: (
+    jobId: string | undefined,
+    storageAuth: StorageAuthHeaders | undefined,
+    framework: ComplianceFramework,
+  ) => {
+    const params = new URLSearchParams();
+    params.set("framework", framework);
+    if (jobId) params.set("jobId", jobId);
+    return request<ComplianceStatusResponse>(`/api/compliance/status?${params.toString()}`, {
+      storageAuth,
+    });
+  },
 
-  getOutputLogs: (storageAuth?: StorageAuthHeaders) =>
-    request<OutputLogsResponse>("/api/output/logs", { storageAuth }),
+  getOutputLogs: (storageAuth?: StorageAuthHeaders, framework?: ComplianceFramework) => {
+    const fw = framework ?? "soc2";
+    return request<OutputLogsResponse>(
+      `/api/output/logs?framework=${encodeURIComponent(fw)}`,
+      { storageAuth },
+    );
+  },
 
   joinWaitlist: (email: string) =>
     request<WaitlistResponse>("/api/waitlist", {

@@ -5,10 +5,13 @@ import {
   faBolt,
   faCircleCheck,
   faClock,
+  faLandmark,
   faShieldHalved,
 } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { motion, useReducedMotion } from "framer-motion";
+import type { ComplianceFramework } from "@/lib/compliance-framework";
+import { COMPLIANCE_FRAMEWORK_LABEL } from "@/lib/compliance-framework";
 
 const CONTROL_FAMILIES = [
   { id: "CC1", label: "Control environment", value: 92 },
@@ -30,7 +33,29 @@ const ACTIVITY = [
   { control: "CC6.7", source: "AWS · KMS rotation policy", when: "2h" },
 ];
 
+/** DPDP Act, 2023 — illustrative obligation coverage (UI mock). */
+const DPDP_OBLIGATIONS = [
+  { id: "Law", label: "Lawful basis & purpose", value: 78 },
+  { id: "Notice", label: "Notice to data principals", value: 71 },
+  { id: "Consent", label: "Consent & withdrawal", value: 82 },
+  { id: "Retention", label: "Storage limitation", value: 69 },
+  { id: "Security", label: "Reasonable security safeguards", value: 88 },
+  { id: "Rights", label: "Data principal rights (access, correction…)", value: 74 },
+  { id: "Children", label: "Children's data", value: 61 },
+  { id: "Cross", label: "Cross-border transfers", value: 66 },
+  { id: "Grievance", label: "Grievance & board", value: 73 },
+];
+
+const DPDP_ACTIVITY = [
+  { control: "Notice", source: "Website · privacy notice v4 published", when: "3m" },
+  { control: "RoPA", source: "Notion · processing inventory updated", when: "14m" },
+  { control: "Consent", source: "Product · consent logs for analytics", when: "28m" },
+  { control: "Retention", source: "S3 · lifecycle on PII bucket", when: "1h" },
+  { control: "DPIA", source: "Risk · high-risk processing reviewed", when: "2h" },
+];
+
 const SPARK_POINTS = [62, 65, 64, 68, 71, 70, 73, 75, 74, 77, 80, 82];
+const SPARK_POINTS_DPDP = [54, 56, 58, 59, 61, 63, 65, 67, 68, 70, 72, 74];
 
 /* ---------- Readiness ring (animated SVG) ---------- */
 export function ReadinessRing({ value }: { value: number }) {
@@ -198,11 +223,11 @@ function Sparkline({ points = SPARK_POINTS }: { points?: number[] }) {
   );
 }
 
-/* ---------- Control coverage bars ---------- */
-function ControlCoverage() {
+/* ---------- Control / DPDP coverage bars ---------- */
+function CoverageBars({ rows }: { rows: { id: string; label: string; value: number }[] }) {
   return (
     <div className="space-y-2.5">
-      {CONTROL_FAMILIES.map((f, i) => (
+      {rows.map((f, i) => (
         <motion.div
           key={f.id}
           initial={{ opacity: 0, x: -8 }}
@@ -269,10 +294,14 @@ function KPI({
 }
 
 /* ---------- Activity feed ---------- */
-function ActivityFeed() {
+function ActivityFeed({
+  items,
+}: {
+  items: { control: string; source: string; when: string }[];
+}) {
   return (
     <ul className="space-y-2">
-      {ACTIVITY.map((a, i) => (
+      {items.map((a, i) => (
         <motion.li
           key={`${a.control}-${a.source}`}
           initial={{ opacity: 0, y: 8 }}
@@ -301,10 +330,15 @@ function ActivityFeed() {
 export function OverviewCharts({
   readiness,
   daysRemaining = 11,
+  framework = "soc2",
 }: {
   readiness: number;
   daysRemaining?: number;
+  framework?: ComplianceFramework;
 }) {
+  const isDpdp = framework === "dpdp";
+  const fwLabel = COMPLIANCE_FRAMEWORK_LABEL[framework];
+
   return (
     <div className="space-y-6">
       {/* Top KPI strip */}
@@ -313,26 +347,26 @@ export function OverviewCharts({
           icon={faBolt}
           label="Readiness"
           value={`${Math.round(readiness)}%`}
-          trend="+6.4%"
+          trend={isDpdp ? "+4.1%" : "+6.4%"}
           hint="vs. last week"
         />
         <KPI
-          icon={faShieldHalved}
-          label="Controls met"
-          value="47 / 58"
+          icon={isDpdp ? faLandmark : faShieldHalved}
+          label={isDpdp ? "Obligations on track" : "Controls met"}
+          value={isDpdp ? "32 / 42" : "47 / 58"}
           trend="+3"
           hint="this week"
         />
         <KPI
           icon={faClock}
-          label="Days to audit"
-          value={`${daysRemaining}d`}
-          hint="On track"
+          label={isDpdp ? "Target review" : "Days to audit"}
+          value={isDpdp ? `${daysRemaining}d` : `${daysRemaining}d`}
+          hint={isDpdp ? "DPDP program" : "On track"}
         />
         <KPI
           icon={faCircleCheck}
-          label="Evidence uptime"
-          value="99.97%"
+          label={isDpdp ? "Notice & consent health" : "Evidence uptime"}
+          value={isDpdp ? "98.2%" : "99.97%"}
           hint="last 30 days"
         />
       </div>
@@ -344,7 +378,7 @@ export function OverviewCharts({
           <div className="relative">
             <div className="mb-4 flex items-center justify-between">
               <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--fg-muted)]">
-                Audit readiness
+                {isDpdp ? "DPDP readiness" : "Audit readiness"}
               </p>
               <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
                 <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.7)]" />
@@ -360,11 +394,13 @@ export function OverviewCharts({
         <div className="rounded-2xl border border-[color-mix(in_oklch,var(--border)_42%,transparent)] bg-[color-mix(in_oklch,var(--card)_90%,transparent)] p-6 glow-border">
           <div className="mb-5 flex items-center justify-between">
             <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--fg-muted)]">
-              Control coverage by family
+              {isDpdp ? "DPDP themes — coverage" : "Control coverage by family"}
             </p>
-            <p className="text-[11px] text-[var(--fg-muted)]">SOC 2 · TSC</p>
+            <p className="text-[11px] text-[var(--fg-muted)]">
+              {isDpdp ? `${fwLabel} · 2023 Act` : "SOC 2 · TSC"}
+            </p>
           </div>
-          <ControlCoverage />
+          <CoverageBars rows={isDpdp ? DPDP_OBLIGATIONS : CONTROL_FAMILIES} />
         </div>
       </div>
 
@@ -380,7 +416,7 @@ export function OverviewCharts({
             </div>
             <p className="text-[11px] text-emerald-500">+12.4% / 12 wks</p>
           </div>
-          <Sparkline />
+          <Sparkline points={isDpdp ? SPARK_POINTS_DPDP : SPARK_POINTS} />
           <div className="mt-4 grid grid-cols-3 gap-3 text-center">
             {[
               { l: "30d", v: "+8.1%" },
@@ -403,14 +439,14 @@ export function OverviewCharts({
         <div className="rounded-2xl border border-[color-mix(in_oklch,var(--border)_42%,transparent)] bg-[color-mix(in_oklch,var(--card)_90%,transparent)] p-6 glow-border">
           <div className="mb-4 flex items-center justify-between">
             <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--fg-muted)]">
-              Recent evidence
+              {isDpdp ? "Recent privacy evidence" : "Recent evidence"}
             </p>
             <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-emerald-500">
               <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.7)]" />
               Streaming
             </span>
           </div>
-          <ActivityFeed />
+          <ActivityFeed items={isDpdp ? DPDP_ACTIVITY : ACTIVITY} />
         </div>
       </div>
     </div>

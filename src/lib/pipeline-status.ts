@@ -1,5 +1,7 @@
 import { Buffer } from "node:buffer";
 
+import type { ComplianceFramework } from "@/lib/compliance-framework";
+import { DEFAULT_COMPLIANCE_FRAMEWORK } from "@/lib/compliance-framework";
 import { getSupabaseServerClient } from "@/lib/supabase";
 import { ensureBucketExists } from "@/lib/supabase-buckets";
 
@@ -19,6 +21,8 @@ export type PipelineStatus = {
   /** Storage isolation key (u-… or g-…). */
   ownerKey: string;
   filePath: string;
+  /** When missing (legacy), treated as SOC 2. */
+  framework?: ComplianceFramework;
   stage: PipelineStage;
   progress: number;
   updatedAt: string;
@@ -36,7 +40,14 @@ export function getStatusPath(ownerKey: string, jobId: string) {
 
 export async function writePipelineStatus(status: PipelineStatus) {
   const supabase = getSupabaseServerClient();
-  await ensureBucketExists(STATUS_BUCKET);
+  try {
+    await ensureBucketExists(STATUS_BUCKET);
+  } catch (e) {
+    console.warn(
+      "Pipeline status: ensureBucketExists failed (upload may still succeed if bucket exists)",
+      e,
+    );
+  }
   const path = getStatusPath(status.ownerKey, status.jobId);
   const body = Buffer.from(JSON.stringify(status));
 
@@ -57,7 +68,7 @@ export async function readPipelineStatus(ownerKey: string, jobId: string) {
   try {
     await ensureBucketExists(STATUS_BUCKET);
   } catch (error) {
-    console.error("Failed to ensure status bucket", error);
+    console.warn("Pipeline status read: bucket check failed", error);
     return null;
   }
   const { data, error } = await supabase.storage
@@ -76,18 +87,25 @@ export async function readPipelineStatus(ownerKey: string, jobId: string) {
   }
 }
 
-export async function listLatestPipelineStatusForOwner(ownerKey: string, limit = 1) {
+export async function listLatestPipelineStatusForOwner(
+  ownerKey: string,
+  limit = 1,
+  framework: ComplianceFramework = DEFAULT_COMPLIANCE_FRAMEWORK,
+) {
   const supabase = getSupabaseServerClient();
   try {
     await ensureBucketExists(STATUS_BUCKET);
   } catch (error) {
-    console.error("Failed to ensure status bucket", error);
+    console.warn(
+      "Pipeline status list: bucket check failed — returning no rows (upload/processing unaffected)",
+      error,
+    );
     return [] as PipelineStatus[];
   }
 
   const prefix = `status/${ownerKey}`;
   const { data, error } = await supabase.storage.from(STATUS_BUCKET).list(prefix, {
-    limit: 40,
+    limit: 80,
     sortBy: { column: "updated_at", order: "desc" },
   });
 
@@ -100,7 +118,10 @@ export async function listLatestPipelineStatusForOwner(ownerKey: string, limit =
     if (!item.name.endsWith(".json")) continue;
     const jobId = item.name.replace(/\.json$/, "");
     const status = await readPipelineStatus(ownerKey, jobId);
-    if (status) statuses.push(status);
+    if (!status) continue;
+    const fw = status.framework ?? DEFAULT_COMPLIANCE_FRAMEWORK;
+    if (fw !== framework) continue;
+    statuses.push(status);
     if (statuses.length >= limit) break;
   }
 

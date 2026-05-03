@@ -64,6 +64,11 @@ export function AuthSignInForm({
         setError(err.message);
         return;
       }
+      void fetch("/api/contact-leads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim(), source: "auth_signin" }),
+      });
       try {
         if (callbackUrl.startsWith("http")) {
           const u = new URL(callbackUrl);

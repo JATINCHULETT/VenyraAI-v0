@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { Resend } from "resend";
+
+import { logContactLead } from "@/lib/contact-leads";
 
 export const runtime = "nodejs";
 
@@ -11,29 +12,11 @@ export async function POST(request: Request) {
     if (!email) {
       return NextResponse.json(
         { ok: false, error: "Missing waitlist email." },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
-    const resendApiKey = process.env.RESEND_API_KEY;
-    const resendFromEmail = process.env.RESEND_FROM_EMAIL;
-    if (!resendApiKey || !resendFromEmail) {
-      return NextResponse.json(
-        { ok: false, error: "Missing RESEND_API_KEY or RESEND_FROM_EMAIL." },
-        { status: 500 }
-      );
-    }
-
-    const resend = new Resend(resendApiKey);
-    await resend.emails.send({
-      from: resendFromEmail,
-      to: email,
-      subject: "HIPAA early access waitlist",
-      html: `
-        <p>Thanks for joining the HIPAA compliance waitlist.</p>
-        <p>We will reach out with early access updates soon.</p>
-      `,
-    });
+    await logContactLead({ email, source: "hipaa_waitlist" });
 
     return NextResponse.json({ ok: true }, { status: 200 });
   } catch (error) {

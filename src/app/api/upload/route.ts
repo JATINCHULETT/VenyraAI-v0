@@ -3,7 +3,12 @@ import { randomUUID } from "node:crypto";
 
 import { NextResponse } from "next/server";
 
+import {
+  frameworkStorageSegment,
+  parseComplianceFramework,
+} from "@/lib/compliance-framework";
 import { runAuditPipeline } from "@/lib/audit-pipeline";
+import { logContactLead } from "@/lib/contact-leads";
 import { resolveStorageOwner } from "@/lib/storage-owner";
 import { ensureBucketExists } from "@/lib/supabase-buckets";
 import { getSupabaseServerClient } from "@/lib/supabase";
@@ -31,6 +36,12 @@ export async function POST(request: Request) {
     const formData = await request.formData();
     const file = formData.get("file");
     const userEmail = formData.get("email");
+    const framework = parseComplianceFramework(
+      typeof formData.get("framework") === "string"
+        ? (formData.get("framework") as string)
+        : null,
+    );
+    const fwSeg = frameworkStorageSegment(framework);
 
     if (!(file instanceof File)) {
       return NextResponse.json(
@@ -50,9 +61,16 @@ export async function POST(request: Request) {
     const fileBuffer = Buffer.from(arrayBuffer);
 
     const supabase = getSupabaseServerClient();
-    await ensureBucketExists(RAW_BUCKET);
+    try {
+      await ensureBucketExists(RAW_BUCKET);
+    } catch (e) {
+      console.warn(
+        "Upload: ensureBucketExists(raw) failed — continuing in case bucket already exists",
+        e,
+      );
+    }
     const jobId = randomUUID();
-    const filePath = `uploads/${ownerKey}/${Date.now()}-${file.name}`;
+    const filePath = `uploads/${ownerKey}/${fwSeg}/${Date.now()}-${file.name}`;
 
     const { error: uploadError } = await supabase.storage
       .from(RAW_BUCKET)
@@ -69,11 +87,18 @@ export async function POST(request: Request) {
       );
     }
 
+    void logContactLead({
+      email: userEmail,
+      source: "document_upload",
+      framework,
+    });
+
     try {
       await writePipelineStatus({
         jobId,
         ownerKey,
         filePath,
+        framework,
         stage: "queued",
         progress: 5,
         updatedAt: new Date().toISOString(),
@@ -88,6 +113,7 @@ export async function POST(request: Request) {
       userEmail,
       jobId,
       ownerKey,
+      framework,
     });
     if (!result.ok) {
       return NextResponse.json(

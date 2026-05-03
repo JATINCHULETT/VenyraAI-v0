@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 
+import {
+  frameworkStorageSegment,
+  parseComplianceFramework,
+} from "@/lib/compliance-framework";
 import { resolveStorageOwner } from "@/lib/storage-owner";
 import { getSupabaseServerClient } from "@/lib/supabase";
 
@@ -15,7 +19,10 @@ export async function GET(request: Request) {
   }
 
   const ownerKey = owner.key;
-  const prefix = `reports/${ownerKey}`;
+  const { searchParams } = new URL(request.url);
+  const framework = parseComplianceFramework(searchParams.get("framework"));
+  const seg = frameworkStorageSegment(framework);
+  const prefix = `reports/${ownerKey}/${seg}`;
   const supabase = getSupabaseServerClient();
   const { data, error } = await supabase.storage.from(FINAL_BUCKET).list(prefix, {
     limit: 25,

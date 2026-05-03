@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { parseComplianceFramework } from "@/lib/compliance-framework";
 import {
   listLatestPipelineStatusForOwner,
   readPipelineStatus,
@@ -20,23 +21,34 @@ export async function GET(request: Request) {
   const ownerKey = owner.key;
   const { searchParams } = new URL(request.url);
   const jobId = searchParams.get("jobId");
+  const framework = parseComplianceFramework(searchParams.get("framework"));
 
   if (jobId) {
     const status = await readPipelineStatus(ownerKey, jobId);
     if (!status) {
       return NextResponse.json(
-        { progress: 0, stage: "queued", updatedAt: new Date().toISOString() },
-        { status: 200 }
+        {
+          progress: 0,
+          stage: "queued",
+          framework,
+          updatedAt: new Date().toISOString(),
+        },
+        { status: 200 },
       );
     }
     return NextResponse.json(status, { status: 200 });
   }
 
-  const [latest] = await listLatestPipelineStatusForOwner(ownerKey, 1);
+  const [latest] = await listLatestPipelineStatusForOwner(ownerKey, 1, framework);
   if (!latest) {
     return NextResponse.json(
-      { progress: 0, stage: "queued", updatedAt: new Date().toISOString() },
-      { status: 200 }
+      {
+        progress: 0,
+        stage: "queued",
+        framework,
+        updatedAt: new Date().toISOString(),
+      },
+      { status: 200 },
     );
   }
 

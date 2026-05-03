@@ -20,6 +20,7 @@
  */
 import type { AuthConfig } from "@auth/core";
 import NextAuth from "next-auth";
+import { logContactLead } from "@/lib/contact-leads";
 import GitHub from "next-auth/providers/github";
 import Google from "next-auth/providers/google";
 import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id";
@@ -86,6 +87,22 @@ export const authConfig = {
    * (incoming Host + proto). Still set AUTH_URL in Vercel for stable absolute URLs.
    */
   trustHost: true,
+  events: {
+    async signIn(message) {
+      const email = message.user?.email?.trim();
+      if (!email) return;
+      const provider = message.account?.provider ?? "unknown";
+      try {
+        await logContactLead({
+          email,
+          source: "oauth_nextauth",
+          detail: provider,
+        });
+      } catch {
+        /* never block sign-in */
+      }
+    },
+  },
   callbacks: {
     /** Default post-OAuth destination is /home, not the bare site root (landing). */
     async redirect({ url, baseUrl }) {

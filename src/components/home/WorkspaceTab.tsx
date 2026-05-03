@@ -15,6 +15,8 @@ import { AnimatePresence, motion } from "framer-motion";
 import { signIn, useSession } from "next-auth/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { OauthProviderFlags } from "@/lib/auth-provider-flags";
+import type { ComplianceFramework } from "@/lib/compliance-framework";
+import { COMPLIANCE_FRAMEWORK_LABEL } from "@/lib/compliance-framework";
 import {
   awsIamCreateRoleUrl,
   fetchIntegrationMetadata,
@@ -26,11 +28,18 @@ import {
   type IntegrationSnapshot,
 } from "@/lib/cloud-integrations";
 
-const STEPS = [
+const STEPS_SOC2 = [
   { id: "scanning", label: "Scanning document", note: "Indexing evidence" },
   { id: "ocr", label: "OCR pipeline", note: "Extracting text" },
   { id: "llm", label: "LLM pipeline", note: "Control mapping" },
   { id: "report", label: "Audit report", note: "Generate + deliver" },
+] as const;
+
+const STEPS_DPDP = [
+  { id: "scanning", label: "Scanning document", note: "Indexing evidence" },
+  { id: "ocr", label: "OCR pipeline", note: "Extracting text" },
+  { id: "llm", label: "LLM pipeline", note: "DPDP gap mapping" },
+  { id: "report", label: "DPDP gap report", note: "Generate + deliver" },
 ] as const;
 
 const PENDING_PROVIDER_KEY = "venyra-pending-provider";
@@ -81,10 +90,16 @@ const INTEGRATION_ROWS: IntegrationRow[] = [
   },
 ];
 
-const RECENT_FILES = [
+const RECENT_FILES_SOC2 = [
   { name: "infosec_policy_v3.pdf", size: "812 KB", when: "2m ago", state: "Analyzed" },
-  { name: "vendor_questionnaire.docx", size: "246 KB", when: "8m ago", state: "Mapped to CC9" },
+  { name: "vendor_questionnaire.pdf", size: "246 KB", when: "8m ago", state: "Mapped to CC9" },
   { name: "MSA_2026.pdf", size: "1.4 MB", when: "1h ago", state: "Indexed" },
+];
+
+const RECENT_FILES_DPDP = [
+  { name: "privacy_notice_en.pdf", size: "412 KB", when: "3m ago", state: "DPDP scan" },
+  { name: "ropa_export_q1.pdf", size: "1.1 MB", when: "12m ago", state: "Retention check" },
+  { name: "dpa_vendor_xyz.pdf", size: "890 KB", when: "1h ago", state: "Cross-border" },
 ];
 
 export function WorkspaceTab({
@@ -101,6 +116,7 @@ export function WorkspaceTab({
   oauthProviders,
   awsAccountId,
   isGuestSession = false,
+  framework = "soc2",
 }: {
   email: string;
   setEmail: (v: string) => void;
@@ -116,8 +132,12 @@ export function WorkspaceTab({
   awsAccountId?: string;
   /** When true, outputs are scoped to this page load only (refresh clears the list). */
   isGuestSession?: boolean;
+  framework?: ComplianceFramework;
 }) {
   const { status } = useSession();
+  const steps = framework === "dpdp" ? STEPS_DPDP : STEPS_SOC2;
+  const recentFiles = framework === "dpdp" ? RECENT_FILES_DPDP : RECENT_FILES_SOC2;
+  const fwLabel = COMPLIANCE_FRAMEWORK_LABEL[framework];
   const [drag, setDrag] = useState(false);
   const [snapshots, setSnapshots] = useState<Partial<Record<CloudProviderKey, IntegrationSnapshot>>>(
     {},
@@ -276,6 +296,13 @@ export function WorkspaceTab({
 
   return (
     <div className="space-y-6">
+      <p className="rounded-xl border border-[color-mix(in_oklch,var(--accent)_28%,transparent)] bg-[color-mix(in_oklch,var(--accent)_8%,transparent)] px-4 py-2.5 text-xs text-[var(--fg)]">
+        <span className="font-semibold">{fwLabel}</span>
+        {framework === "dpdp"
+          ? " · Uploads use the same OCR → LLM → PDF pipeline; reports are stored under your DPDP output folder only."
+          : " · Pipeline outputs are stored separately from India DPDP — switch program in the sidebar to view the other vault."}
+      </p>
+
       {/* Upload error banner */}
       {uploadError && (
         <motion.div
@@ -345,17 +372,30 @@ export function WorkspaceTab({
             <div>
               <h3 className="text-base font-semibold tracking-tight">Drop documents</h3>
               <p className="mt-1 text-sm text-[var(--fg-muted)]">
-                PDFs only — TLS in transit, processed by Gemini.
+                {framework === "dpdp"
+                  ? "Privacy policies, notices, RoPA, DPIAs — PDF only. Same secure OCR + Gemini stack."
+                  : "PDFs only — TLS in transit, processed by Gemini."}
               </p>
             </div>
           </div>
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="you@company.com"
-            className="w-full max-w-xs rounded-xl border border-[color-mix(in_oklch,var(--border)_55%,transparent)] bg-[var(--bg)]/55 px-3 py-2.5 text-xs outline-none ring-[var(--accent)] transition-shadow focus:ring-2"
-          />
+          <div className="w-full max-w-xs shrink-0">
+            <label htmlFor="venyra-work-email" className="sr-only">
+              Work email for report delivery
+            </label>
+            <input
+              id="venyra-work-email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="Work email (report link sent here)"
+              autoComplete="email"
+              className="w-full rounded-xl border border-[color-mix(in_oklch,var(--border)_55%,transparent)] bg-[var(--bg)]/55 px-3 py-2.5 text-xs outline-none ring-[var(--accent)] transition-shadow focus:ring-2"
+            />
+            <p className="mt-1.5 text-[10px] leading-snug text-[var(--fg-muted)]">
+              We log this address when you upload so we can follow up. Download your report from the Output tab when
+              ready.
+            </p>
+          </div>
         </div>
 
         <div
@@ -411,7 +451,9 @@ export function WorkspaceTab({
             <>
               <FontAwesomeIcon icon={faCloudArrowUp} className="h-8 w-8 text-[var(--fg-muted)] opacity-70" />
               <p className="mt-3 text-center text-sm font-medium">Drag &amp; drop a PDF or click to browse</p>
-              <p className="mt-1.5 text-center text-xs text-[var(--fg-muted)]">PDF only · OCR + Gemini 2.5 Flash</p>
+              <p className="mt-1.5 text-center text-xs text-[var(--fg-muted)]">
+                PDF only · OCR + Gemini 2.5 Flash · {fwLabel}
+              </p>
             </>
           )}
         </div>
@@ -421,7 +463,7 @@ export function WorkspaceTab({
             Recently processed
           </p>
           <ul className="mt-2 space-y-1.5">
-            {RECENT_FILES.map((f) => (
+            {recentFiles.map((f) => (
               <li
                 key={f.name}
                 className="flex items-center justify-between gap-3 rounded-xl border border-[color-mix(in_oklch,var(--border)_32%,transparent)] bg-[var(--bg)]/40 px-3.5 py-2.5"
@@ -442,11 +484,11 @@ export function WorkspaceTab({
       </div>
 
       {/* ── Pipeline progress ── */}
-      <div className="rounded-2xl border border-[color-mix(in_oklch,var(--border)_42%,transparent)] bg-[color-mix(in_oklch,var(--card)_90%,transparent)] p-6 md:p-7 glow-border">
+        <div className="rounded-2xl border border-[color-mix(in_oklch,var(--border)_42%,transparent)] bg-[color-mix(in_oklch,var(--card)_90%,transparent)] p-6 md:p-7 glow-border">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--fg-muted)]">
-              Processing pipeline
+              Processing pipeline · {fwLabel}
             </p>
             <p className="mt-1.5 text-sm text-[var(--fg-muted)]">{aiLine}</p>
           </div>
@@ -460,12 +502,12 @@ export function WorkspaceTab({
           <motion.div
             className="absolute left-0 top-[15px] h-px bg-gradient-to-r from-[var(--accent)] to-[oklch(0.7_0.16_290)] md:top-[19px]"
             initial={false}
-            animate={{ width: `${(activeStep / (STEPS.length - 1)) * 100}%` }}
+            animate={{ width: `${(activeStep / (steps.length - 1)) * 100}%` }}
             transition={{ type: "spring", stiffness: 130, damping: 22 }}
           />
 
           <div className="relative grid grid-cols-2 gap-6 md:grid-cols-4 md:gap-3">
-            {STEPS.map((step, i) => {
+            {steps.map((step, i) => {
               const done = i < activeStep;
               const current = i === activeStep;
               return (
