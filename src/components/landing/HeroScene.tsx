@@ -88,8 +88,60 @@ export function HeroScene() {
         </>
       )}
 
-      {/* stardust */}
+      {/* stardust (dark hero) */}
       <div className="stardust absolute inset-0 hidden dark:block" aria-hidden />
+
+      {/* floating motes — light + dark */}
+      {!reduce && (
+        <>
+          <div className="pointer-events-none absolute inset-0 overflow-hidden dark:hidden" aria-hidden>
+            {[...Array(14)].map((_, i) => (
+              <motion.span
+                key={`l-${i}`}
+                className="absolute h-1 w-1 rounded-full bg-[color-mix(in_oklch,var(--accent)_55%,transparent)] shadow-[0_0_12px_var(--glow-soft)]"
+                style={{
+                  left: `${8 + ((i * 17) % 84)}%`,
+                  top: `${12 + ((i * 23) % 70)}%`,
+                }}
+                animate={{
+                  y: [0, -18, 0],
+                  opacity: [0.25, 0.7, 0.25],
+                  scale: [1, 1.35, 1],
+                }}
+                transition={{
+                  duration: 5 + (i % 5),
+                  repeat: Infinity,
+                  ease: "easeInOut",
+                  delay: i * 0.35,
+                }}
+              />
+            ))}
+          </div>
+          <div className="pointer-events-none absolute inset-0 hidden overflow-hidden dark:block" aria-hidden>
+            {[...Array(12)].map((_, i) => (
+              <motion.span
+                key={`d-${i}`}
+                className="absolute h-[3px] w-[3px] rounded-full bg-[oklch(0.78_0.14_180_/_0.5)] shadow-[0_0_14px_oklch(0.72_0.14_180_/_0.45)]"
+                style={{
+                  left: `${10 + ((i * 19) % 80)}%`,
+                  top: `${15 + ((i * 29) % 65)}%`,
+                }}
+                animate={{
+                  y: [0, -22, 0],
+                  x: [0, i % 2 === 0 ? 8 : -8, 0],
+                  opacity: [0.2, 0.85, 0.2],
+                }}
+                transition={{
+                  duration: 6 + (i % 4),
+                  repeat: Infinity,
+                  ease: "easeInOut",
+                  delay: i * 0.42,
+                }}
+              />
+            ))}
+          </div>
+        </>
+      )}
 
       {/* horizon vignette */}
       <div className="horizon-fade" aria-hidden />

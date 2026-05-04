@@ -9,10 +9,10 @@ import {
   faDiagramProject,
   faDownload,
   faMagnifyingGlass,
-  faShieldHalved,
 } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { motion } from "framer-motion";
+import { VenyraLogoMark } from "@/components/brand/VenyraLogoMark";
 
 const NAV = [
   { icon: faChartPie, label: "Overview", active: true },
@@ -53,9 +53,7 @@ export function ProductPreview() {
           {/* Sidebar */}
           <aside className="hidden border-r border-[color-mix(in_oklch,var(--border)_50%,transparent)] bg-[color-mix(in_oklch,var(--card)_70%,var(--bg)_30%)] p-3 sm:block">
             <div className="mb-4 flex items-center gap-2 px-2 py-2">
-              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[var(--accent)] text-[var(--accent-foreground)]">
-                <FontAwesomeIcon icon={faShieldHalved} className="h-3 w-3" />
-              </span>
+              <VenyraLogoMark size={28} className="rounded-lg ring-1 ring-[color-mix(in_oklch,var(--border)_35%,transparent)]" />
               <div className="leading-tight">
                 <p className="text-[11px] font-semibold">Acme Corp</p>
                 <p className="text-[9px] text-[var(--fg-muted)]">SOC 2 Type II</p>

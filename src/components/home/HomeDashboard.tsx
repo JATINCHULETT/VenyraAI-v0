@@ -12,7 +12,6 @@ import {
   faHouse,
   faLayerGroup,
   faMagnifyingGlass,
-  faShieldHalved,
   faStethoscope,
   faXmark,
 } from "@fortawesome/free-solid-svg-icons";
@@ -30,6 +29,7 @@ import {
   COMPLIANCE_FRAMEWORK_LABEL,
   COMPLIANCE_FRAMEWORK_SUB,
 } from "@/lib/compliance-framework";
+import { VenyraLogoMark } from "@/components/brand/VenyraLogoMark";
 import { OverviewCharts } from "./OverviewCharts";
 import { WorkspaceTab } from "./WorkspaceTab";
 
@@ -437,8 +437,8 @@ function Sidebar({
   return (
     <aside className="sticky top-0 hidden h-screen w-[15.5rem] shrink-0 flex-col border-r border-[color-mix(in_oklch,var(--border)_42%,transparent)] bg-[color-mix(in_oklch,var(--card)_55%,var(--bg)_45%)] backdrop-blur-xl md:flex">
       <div className="flex items-center gap-3 px-5 py-5">
-        <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--accent)] text-[var(--accent-foreground)] shadow-[0_0_28px_-8px_var(--glow)]">
-          <FontAwesomeIcon icon={faShieldHalved} className="h-[1.15rem] w-[1.15rem]" />
+        <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[color-mix(in_oklch,var(--card)_75%,transparent)] shadow-[0_0_28px_-8px_var(--glow)] ring-1 ring-[color-mix(in_oklch,var(--border)_40%,transparent)]">
+          <VenyraLogoMark size={36} className="rounded-lg" />
         </span>
         <div className="min-w-0 leading-tight">
           <p className="truncate text-sm font-semibold">Venyra AI</p>

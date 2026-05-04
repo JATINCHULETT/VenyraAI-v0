@@ -5,7 +5,8 @@ export type ContactLeadSource =
   | "document_upload"
   | "auth_signin"
   | "auth_signup"
-  | "oauth_nextauth";
+  | "oauth_nextauth"
+  | "landing_contact";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -20,18 +21,32 @@ export async function logContactLead(params: {
   framework?: string | null;
   /** e.g. OAuth provider id when source is oauth_nextauth */
   detail?: string | null;
+  /** Landing / contact form */
+  name?: string | null;
+  company?: string | null;
+  message?: string | null;
 }): Promise<void> {
   const email = params.email.trim().toLowerCase();
   if (!email || !EMAIL_RE.test(email)) return;
 
   try {
     const supabase = getSupabaseServerClient();
-    const { error } = await supabase.from("contact_leads").insert({
+    const base = {
       email,
       source: params.source,
       framework: params.framework?.trim() || null,
       detail: params.detail?.trim() || null,
-    });
+    };
+    const row =
+      params.source === "landing_contact"
+        ? {
+            ...base,
+            name: params.name?.trim() || null,
+            company: params.company?.trim() || null,
+            message: params.message?.trim() || null,
+          }
+        : base;
+    const { error } = await supabase.from("contact_leads").insert(row);
     if (error) {
       console.warn("[contact_leads] insert failed:", error.message);
     }

@@ -4,6 +4,73 @@ import { faArrowRight, faCircleCheck } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { motion } from "framer-motion";
 
+/** Brighter teal so rings / labels read on dark hero cards (matches landing DPDP neon) */
+const DPDP_TEAL = "#00d4be";
+const DPDP_SLATE = "#2c3e50";
+
+/* -- SCENE: India DPDP obligation map (teal accent) -- */
+function DpdpScene() {
+  return (
+    <div className="relative h-full w-full scene-orbit">
+      <div className="absolute inset-0 flex items-center justify-center">
+        {[0, 1, 2, 3].map((i) => (
+          <motion.div
+            key={i}
+            className="absolute rounded-full border"
+            style={{
+              width: `${28 + i * 20}%`,
+              height: `${28 + i * 20}%`,
+              borderColor: `${DPDP_TEAL}${i === 0 ? "66" : "33"}`,
+            }}
+            animate={{ rotate: i % 2 === 0 ? 360 : -360 }}
+            transition={{ duration: 48 + i * 24, repeat: Infinity, ease: "linear" }}
+          >
+            <span
+              className="absolute h-2 w-2 rounded-full shadow-[0_0_14px_rgba(26,188,156,0.55)]"
+              style={{
+                background: DPDP_TEAL,
+                top: i === 0 ? "6%" : i === 1 ? "14%" : i === 2 ? "22%" : "34%",
+                left: i === 0 ? "88%" : i === 1 ? "10%" : i === 2 ? "78%" : "16%",
+              }}
+            />
+          </motion.div>
+        ))}
+
+        <motion.div
+          className="relative flex h-24 w-24 flex-col items-center justify-center rounded-full text-center shadow-[0_0_48px_rgba(26,188,156,0.35)]"
+          style={{ background: `linear-gradient(145deg, ${DPDP_SLATE} 0%, ${DPDP_TEAL} 100%)` }}
+          animate={{ scale: [1, 1.05, 1] }}
+          transition={{ duration: 3.4, repeat: Infinity, ease: "easeInOut" }}
+        >
+          <span className="text-[10px] font-bold uppercase leading-tight tracking-widest text-white">
+            India
+          </span>
+          <span className="text-xs font-semibold uppercase tracking-widest text-white/95">DPDP</span>
+        </motion.div>
+      </div>
+
+      <div
+        className="absolute left-5 top-5 text-[10px] font-semibold uppercase tracking-[0.18em]"
+        style={{ color: DPDP_TEAL }}
+      >
+        Notice & consent
+      </div>
+      <div className="absolute right-5 top-5 text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--fg-muted)]">
+        Data principal rights
+      </div>
+      <div className="absolute bottom-5 left-5 text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--fg-muted)]">
+        Cross-border transfers
+      </div>
+      <div
+        className="absolute bottom-5 right-5 text-[10px] font-semibold uppercase tracking-[0.18em]"
+        style={{ color: DPDP_TEAL }}
+      >
+        Security safeguards
+      </div>
+    </div>
+  );
+}
+
 /* -- SCENE: orbital control map (used by AI engine story) -- */
 function OrbitScene() {
   return (
@@ -35,8 +102,8 @@ function OrbitScene() {
         {/* core */}
         <motion.div
           className="relative flex h-24 w-24 items-center justify-center rounded-full bg-[var(--accent)] text-[var(--accent-foreground)] shadow-[0_0_60px_var(--glow)]"
-          animate={{ scale: [1, 1.04, 1] }}
-          transition={{ duration: 3.2, repeat: Infinity, ease: "easeInOut" }}
+          animate={{ scale: [1, 1.08, 1] }}
+          transition={{ duration: 2.7, repeat: Infinity, ease: "easeInOut" }}
         >
           <span className="text-xs font-semibold tracking-widest">SOC 2</span>
         </motion.div>
@@ -116,6 +183,8 @@ function StorySection({
   bullets,
   scene,
   reverse = false,
+  sectionId,
+  ctaHref = "#pricing",
 }: {
   eyebrow: string;
   headline: React.ReactNode;
@@ -123,9 +192,11 @@ function StorySection({
   bullets?: string[];
   scene: React.ReactNode;
   reverse?: boolean;
+  sectionId?: string;
+  ctaHref?: string;
 }) {
   return (
-    <section className="relative px-5 py-20 md:px-8 md:py-28">
+    <section id={sectionId} className="relative scroll-mt-24 px-5 py-20 md:px-8 md:py-28">
       <div className="mx-auto grid max-w-6xl items-center gap-10 lg:grid-cols-2 lg:gap-16">
         <motion.div
           initial={{ opacity: 0, y: 24 }}
@@ -154,7 +225,7 @@ function StorySection({
             </ul>
           )}
           <a
-            href="#pricing"
+            href={ctaHref}
             className="mt-8 inline-flex items-center gap-2 text-sm font-semibold text-[var(--accent)] hover:underline"
           >
             See how it works
@@ -216,6 +287,30 @@ export function StorySections() {
           "Always-on readiness with clear % complete",
         ]}
         scene={<EvidenceScene />}
+      />
+
+      <StorySection
+        sectionId="dpdp"
+        eyebrow="India DPDP · Digital Personal Data Protection Act, 2023"
+        headline={
+          <>
+            Privacy law with teeth.
+            <br />
+            <span
+              className="bg-gradient-to-r from-[#1abc9c] via-[#2c3e50] to-[#1abc9c] bg-clip-text text-transparent dark:from-[#1abc9c] dark:via-[#5eead4] dark:to-[#1abc9c]"
+            >
+              Mapped like a control framework.
+            </span>
+          </>
+        }
+        body="The DPDP Act applies to digital personal data processed in India—and to overseas processors serving Indian users. Venyra keeps DPDP analysis in a dedicated workspace: upload privacy notices, records of processing, or policies and receive gap narratives aligned to lawful basis, notice, consent, purpose limitation, retention, security, data principal rights, children’s data, cross-border transfers, and Significant Data Fiduciary duties where relevant."
+        bullets={[
+          "Segregated DPDP vault—never mixed with SOC 2 exports",
+          "Theme-level gap reports your counsel can trace to the Act",
+          "Same OCR → LLM pipeline you trust for audit evidence",
+        ]}
+        scene={<DpdpScene />}
+        ctaHref="#contact"
       />
     </>
   );
