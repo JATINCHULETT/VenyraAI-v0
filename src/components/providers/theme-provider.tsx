@@ -30,14 +30,14 @@ function getSystem(): "light" | "dark" {
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>("system");
+  /** Default dark for all new sessions; localStorage still overrides after mount. */
+  const [theme, setThemeState] = useState<Theme>("dark");
   const [resolved, setResolved] = useState<"light" | "dark">("dark");
 
   useEffect(() => {
     const stored = localStorage.getItem(STORAGE_KEY) as Theme | null;
-    if (stored === "light" || stored === "dark" || stored === "system") {
-      setThemeState(stored);
-    }
+    if (stored === "light") setThemeState("light");
+    // dark | system | missing → keep default dark (initial state)
   }, []);
 
   useEffect(() => {

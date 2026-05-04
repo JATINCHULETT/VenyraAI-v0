@@ -24,7 +24,7 @@ export default async function RootLayout({
 }>) {
   const session = (await auth()) as Session | null;
   return (
-    <html lang="en" suppressHydrationWarning className={inter.variable}>
+    <html lang="en" suppressHydrationWarning className={`${inter.variable} dark`}>
       <body className="min-h-screen antialiased">
         <AppProviders session={session}>{children}</AppProviders>
       </body>
